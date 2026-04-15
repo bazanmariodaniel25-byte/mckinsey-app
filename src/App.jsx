@@ -286,16 +286,20 @@ function LoginScreen({ onLogin }) {
   useEffect(() => {
     const saved = localStore.get("mckinsey_companies") || [];
     setCompanies(saved);
-    try {
-      db.query("mckinsey_companies", { select: "id,name,created_at", order: "created_at.desc", limit: 20 })
-        .then(rows => {
-          if (rows && rows.length) {
-            const merged = [...rows];
-            setCompanies(merged);
-            localStore.set("mckinsey_companies", merged);
-          }
-        }).catch(() => {});
-    } catch {}
+    fetch(`${SUPABASE_URL}/rest/v1/mckinsey_companies?select=id,name,created_at&order=created_at.desc&limit=50`, {
+      headers: {
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+      }
+    })
+      .then(r => r.json())
+      .then(rows => {
+        if (Array.isArray(rows) && rows.length > 0) {
+          setCompanies(rows);
+          localStore.set("mckinsey_companies", rows);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const createCompany = async () => {
