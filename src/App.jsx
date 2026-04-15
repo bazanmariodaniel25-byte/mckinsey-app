@@ -181,26 +181,31 @@ function useSession(companyId, sessionId) {
   return { session, persist, loading };
 }
 
+// ── TOUCH DRAG GLOBAL STATE ──────────────────────────────────
+// Usamos una variable global para pasar el item que se está arrastrando
+// entre eventos de touch en distintos elementos del DOM
+let _touchDragData = null;
+
 // ── COMPONENTE: Card de negocio ───────────────────────────────
-function BizCard({ business, color, small, selected }) {
+function BizCard({ business, color, small }) {
   return (
     <div style={{
       background: color || "var(--color-background-primary)",
-      border: selected ? "3px solid #fff" : `2px solid ${color ? "rgba(0,0,0,.18)" : "var(--color-border-secondary)"}`,
+      border: `2px solid ${color ? "rgba(0,0,0,.18)" : "var(--color-border-secondary)"}`,
       borderRadius: 8,
       padding: small ? "3px 8px" : "6px 12px",
       fontSize: small ? 11 : 13,
       fontWeight: 600,
       color: color ? "#fff" : "var(--color-text-primary)",
-      cursor: "pointer",
+      cursor: "grab",
       userSelect: "none",
-      boxShadow: selected ? `0 0 0 3px ${color || "#1976d2"}, 0 4px 12px rgba(0,0,0,.25)` : "0 2px 6px rgba(0,0,0,.13)",
+      WebkitUserSelect: "none",
+      boxShadow: "0 2px 6px rgba(0,0,0,.13)",
       whiteSpace: "nowrap",
       maxWidth: small ? 90 : 130,
       overflow: "hidden",
       textOverflow: "ellipsis",
-      transform: selected ? "scale(1.08)" : "scale(1)",
-      transition: "transform .15s, box-shadow .15s",
+      touchAction: "none",
     }}>
       {business.name}
     </div>
@@ -208,7 +213,7 @@ function BizCard({ business, color, small, selected }) {
 }
 
 // ── COMPONENTE: MatrixBoard ───────────────────────────────────
-function MatrixBoard({ matrix, onDrop, renderCell, readOnly, selected }) {
+function MatrixBoard({ matrix, onDrop, renderCell, readOnly }) {
   const [dragOver, setDragOver] = useState(null);
   const rowLabels = ["Alto", "Medio", "Bajo"];
   const colLabels = ["Débil", "Media", "Fuerte"];
@@ -222,7 +227,6 @@ function MatrixBoard({ matrix, onDrop, renderCell, readOnly, selected }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      {/* Header cols */}
       <div style={{ display: "flex", marginLeft: 68 }}>
         {colLabels.map((l, i) => (
           <div key={l} style={{
@@ -234,7 +238,6 @@ function MatrixBoard({ matrix, onDrop, renderCell, readOnly, selected }) {
         ))}
       </div>
       <div style={{ display: "flex", alignItems: "stretch" }}>
-        {/* Row labels */}
         <div style={{ display: "flex", flexDirection: "column", width: 68, gap: 2 }}>
           {rowLabels.map(l => (
             <div key={l} style={{
@@ -244,25 +247,27 @@ function MatrixBoard({ matrix, onDrop, renderCell, readOnly, selected }) {
             }}>{l}</div>
           ))}
         </div>
-        {/* Grid */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", flex: 1, gap: 2 }}>
           {matrix.map((row, r) => row.map((cell, c) => {
             const key = `${r}-${c}`;
-            const isTarget = selected && !readOnly;
             return (
               <div
                 key={key}
                 onDragOver={e => { if (!readOnly) { e.preventDefault(); setDragOver(key); } }}
                 onDragLeave={() => setDragOver(null)}
                 onDrop={e => { setDragOver(null); if (!readOnly) onDrop(e, r, c); }}
-                onClick={() => { if (isTarget) onDrop(null, r, c); }}
+                onTouchEnd={e => {
+                  if (readOnly || !_touchDragData) return;
+                  e.preventDefault();
+                  onDrop(null, r, c);
+                  setDragOver(null);
+                }}
                 style={{
-                  background: dragOver === key ? "#b3d9ff" : isTarget ? "#e3f2fd" : cellBg(r, c),
+                  background: dragOver === key ? "#b3d9ff" : cellBg(r, c),
                   borderRadius: 6, minHeight: 88, padding: 6,
                   display: "flex", flexWrap: "wrap", gap: 4, alignContent: "flex-start",
-                  border: dragOver === key ? "2px dashed #2196f3" : isTarget ? "2px dashed #1976d2" : "2px solid transparent",
+                  border: dragOver === key ? "2px dashed #2196f3" : "2px solid transparent",
                   transition: "background .15s",
-                  cursor: isTarget ? "pointer" : "default",
                 }}
               >
                 {renderCell(r, c, cell)}
@@ -278,476 +283,147 @@ function MatrixBoard({ matrix, onDrop, renderCell, readOnly, selected }) {
   );
 }
 
-// ── PANTALLA: Login / Selección empresa ───────────────────────
-function LoginScreen({ onLogin }) {
-  const [mode, setMode] = useState("select"); // select | create | join
-  const [companyName, setCompanyName] = useState("");
-  const [companyId, setCompanyId] = useState("");
-  const [participantName, setParticipantName] = useState("");
-  const [adminPass, setAdminPass] = useState("");
-  const [err, setErr] = useState("");
-  const [companies, setCompanies] = useState([]);
-
-  useEffect(() => {
-    const saved = localStore.get("mckinsey_companies") || [];
-    setCompanies(saved);
-    fetch(`${SUPABASE_URL}/rest/v1/mckinsey_companies?select=id,name,created_at&order=created_at.desc&limit=50`, {
-      headers: {
-        "apikey": SUPABASE_ANON_KEY,
-        "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
-      }
-    })
-      .then(r => r.json())
-      .then(rows => {
-        if (Array.isArray(rows) && rows.length > 0) {
-          setCompanies(rows);
-          localStore.set("mckinsey_companies", rows);
-        }
-      })
-      .catch(() => {});
-  }, []);
-
-  const createCompany = async () => {
-    const name = companyName.trim();
-    if (!name) { setErr("Ingresá un nombre para la empresa"); return; }
-    if (!adminPass || adminPass !== ADMIN_PASSWORD) { setErr("Contraseña de admin incorrecta"); return; }
-    const id = uid() + uid();
-    const company = { id, name, created_at: new Date().toISOString() };
-    try { await db.upsert("mckinsey_companies", company); } catch {}
-    const updated = [company, ...companies];
-    setCompanies(updated);
-    localStore.set("mckinsey_companies", updated);
-    onLogin({ companyId: id, companyName: name, role: "admin" });
-  };
-
-  const joinAsAdmin = (cid, cname) => {
-    if (!adminPass || adminPass !== ADMIN_PASSWORD) { setErr("Contraseña de admin incorrecta"); return; }
-    onLogin({ companyId: cid, companyName: cname, role: "admin" });
-  };
-
-  const joinAsParticipant = async (cid, cname) => {
-    const name = participantName.trim();
-    if (!name) { setErr("Ingresá tu nombre"); return; }
-    onLogin({ companyId: cid, companyName: cname, role: "participant", name });
-  };
-
-  return (
-    <div style={{
-      minHeight: "100vh",
-      background: "linear-gradient(135deg,#0d1b4b 0%,#1a3a8f 50%,#0d3b6e 100%)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      fontFamily: "'Georgia', 'Times New Roman', serif",
-    }}>
-      <div style={{ width: "100%", maxWidth: 480, padding: "0 16px" }}>
-        {/* Logo */}
-        <div style={{ textAlign: "center", marginBottom: 32 }}>
-          <div style={{
-            display: "inline-flex", alignItems: "center", justifyContent: "center",
-            width: 64, height: 64, borderRadius: 16,
-            background: "rgba(255,255,255,.15)", marginBottom: 16,
-            fontSize: 32, border: "1px solid rgba(255,255,255,.25)",
-          }}>⬡</div>
-          <h1 style={{ color: "#fff", fontSize: 28, fontWeight: 400, margin: "0 0 6px", letterSpacing: -0.5 }}>
-            Matriz McKinsey
-          </h1>
-          <p style={{ color: "rgba(255,255,255,.6)", fontSize: 14, margin: 0 }}>
-            Plataforma colaborativa de estrategia empresarial
-          </p>
-        </div>
-
-        <div style={{
-          background: "rgba(255,255,255,.97)",
-          borderRadius: 18, padding: 32,
-          boxShadow: "0 20px 60px rgba(0,0,0,.35)",
-        }}>
-          {mode === "select" && (
-            <>
-              <h2 style={{ margin: "0 0 20px", fontSize: 18, fontWeight: 600, color: "#1a237e" }}>
-                Seleccioná tu empresa
-              </h2>
-              {companies.length === 0 ? (
-                <p style={{ color: "#888", fontSize: 14, textAlign: "center", padding: "16px 0" }}>
-                  No hay empresas registradas aún.
-                </p>
-              ) : (
-                <div style={{ maxHeight: 200, overflowY: "auto", marginBottom: 16 }}>
-                  {companies.map(c => (
-                    <div
-                      key={c.id}
-                      onClick={() => { setCompanyId(c.id); setMode("join"); setErr(""); }}
-                      style={{
-                        padding: "10px 14px", borderRadius: 10, background: "#f5f7ff",
-                        border: "1px solid #dde4ff", marginBottom: 8, cursor: "pointer",
-                        display: "flex", alignItems: "center", gap: 10,
-                        transition: "background .15s",
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = "#e8edff"}
-                      onMouseLeave={e => e.currentTarget.style.background = "#f5f7ff"}
-                    >
-                      <span style={{ fontSize: 18 }}>🏢</span>
-                      <span style={{ fontWeight: 600, fontSize: 14, color: "#1a237e", flex: 1 }}>{c.name}</span>
-                      <span style={{ fontSize: 11, color: "#888" }}>
-                        {new Date(c.created_at).toLocaleDateString("es-AR")}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <button
-                onClick={() => { setMode("create"); setErr(""); }}
-                style={{
-                  width: "100%", padding: "11px", background: "#1a237e",
-                  color: "#fff", border: "none", borderRadius: 10,
-                  fontWeight: 700, fontSize: 14, cursor: "pointer",
-                }}
-              >
-                + Nueva empresa
-              </button>
-              {err && <p style={{ color: "#e53935", fontSize: 12, marginTop: 10, textAlign: "center" }}>{err}</p>}
-            </>
-          )}
-
-          {mode === "create" && (
-            <>
-              <button onClick={() => setMode("select")} style={{ background: "none", border: "none", color: "#1a237e", cursor: "pointer", fontSize: 13, padding: 0, marginBottom: 16 }}>
-                ← Volver
-              </button>
-              <h2 style={{ margin: "0 0 20px", fontSize: 18, fontWeight: 600, color: "#1a237e" }}>
-                Crear nueva empresa
-              </h2>
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ fontSize: 12, fontWeight: 700, color: "#444", display: "block", marginBottom: 4 }}>
-                  NOMBRE DE LA EMPRESA
-                </label>
-                <input
-                  value={companyName} onChange={e => setCompanyName(e.target.value)}
-                  placeholder="Ej: Grupo Alfa SA"
-                  style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #ddd", fontSize: 14, boxSizing: "border-box" }}
-                />
-              </div>
-              <div style={{ marginBottom: 18 }}>
-                <label style={{ fontSize: 12, fontWeight: 700, color: "#444", display: "block", marginBottom: 4 }}>
-                  CONTRASEÑA DE ADMINISTRADOR
-                </label>
-                <input
-                  type="password" value={adminPass} onChange={e => setAdminPass(e.target.value)}
-                  placeholder="Contraseña admin"
-                  style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #ddd", fontSize: 14, boxSizing: "border-box" }}
-                />
-              </div>
-              <button
-                onClick={createCompany}
-                style={{ width: "100%", padding: "11px", background: "#2e7d32", color: "#fff", border: "none", borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: "pointer" }}
-              >
-                Crear empresa y continuar como Admin
-              </button>
-              {err && <p style={{ color: "#e53935", fontSize: 12, marginTop: 10, textAlign: "center" }}>{err}</p>}
-            </>
-          )}
-
-          {mode === "join" && (
-            <>
-              <button onClick={() => { setMode("select"); setErr(""); }} style={{ background: "none", border: "none", color: "#1a237e", cursor: "pointer", fontSize: 13, padding: 0, marginBottom: 16 }}>
-                ← Volver
-              </button>
-              <h2 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 600, color: "#1a237e" }}>
-                {companies.find(c => c.id === companyId)?.name || "Empresa"}
-              </h2>
-              <p style={{ margin: "0 0 20px", fontSize: 13, color: "#666" }}>Elegí cómo querés ingresar</p>
-
-              {/* Participante */}
-              <div style={{ background: "#f5f7ff", borderRadius: 12, padding: 16, marginBottom: 14 }}>
-                <div style={{ fontWeight: 700, fontSize: 12, color: "#1a237e", marginBottom: 10 }}>
-                  👤 INGRESAR COMO PARTICIPANTE
-                </div>
-                <input
-                  value={participantName} onChange={e => setParticipantName(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && joinAsParticipant(companyId, companies.find(c => c.id === companyId)?.name)}
-                  placeholder="Tu nombre completo"
-                  style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #dde", fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
-                />
-                <button
-                  onClick={() => joinAsParticipant(companyId, companies.find(c => c.id === companyId)?.name)}
-                  style={{ width: "100%", padding: "9px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer" }}
-                >
-                  Ingresar
-                </button>
-              </div>
-
-              {/* Admin */}
-              <div style={{ background: "#fdf0ff", borderRadius: 12, padding: 16 }}>
-                <div style={{ fontWeight: 700, fontSize: 12, color: "#6a1b9a", marginBottom: 10 }}>
-                  🔐 INGRESAR COMO ADMINISTRADOR
-                </div>
-                <input
-                  type="password" value={adminPass} onChange={e => setAdminPass(e.target.value)}
-                  placeholder="Contraseña admin"
-                  style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #e8d0f5", fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
-                />
-                <button
-                  onClick={() => joinAsAdmin(companyId, companies.find(c => c.id === companyId)?.name)}
-                  style={{ width: "100%", padding: "9px", background: "#6a1b9a", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer" }}
-                >
-                  Ingresar como Admin
-                </button>
-              </div>
-              {err && <p style={{ color: "#e53935", fontSize: 12, marginTop: 10, textAlign: "center" }}>{err}</p>}
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── PANEL: Setup ─────────────────────────────────────────────
-function SetupPanel({ session, persist, colorMap }) {
-  const [bizInput, setBizInput] = useState("");
-  const [partInput, setPartInput] = useState("");
-  const pids = Object.keys(session.participants);
-
-  const addBiz = () => {
-    const v = bizInput.trim(); if (!v) return;
-    persist({ ...session, businesses: [...session.businesses, { id: uid(), name: v }] });
-    setBizInput("");
-  };
-  const addPart = () => {
-    const v = partInput.trim(); if (!v) return;
-    const pid = uid();
-    persist({ ...session, participants: { ...session.participants, [pid]: { label: v, name: "" } } });
-    setPartInput("");
-  };
-  const startVoting = () => {
-    const iv = {};
-    Object.keys(session.participants).forEach(pid => { iv[pid] = emptyMatrix(); });
-    persist({ ...session, phase: PHASES.VOTING, votingOpen: true, votes: iv });
-  };
-
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
-      {/* Negocios */}
-      <div style={{ background: "var(--color-background-primary)", borderRadius: 12, padding: 20, boxShadow: "0 2px 8px rgba(0,0,0,.07)" }}>
-        <h3 style={{ margin: "0 0 14px", color: "#1a237e", fontSize: 16 }}>📦 Negocios / Unidades</h3>
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          <input value={bizInput} onChange={e => setBizInput(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && addBiz()}
-            placeholder="Nombre del negocio..."
-            style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #ddd", fontSize: 13 }}
-          />
-          <button onClick={addBiz} style={{ padding: "8px 14px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, cursor: "pointer" }}>+</button>
-        </div>
-        <div style={{ maxHeight: 280, overflowY: "auto" }}>
-          {session.businesses.map(b => (
-            <div key={b.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "#f5f5f5", borderRadius: 8, marginBottom: 6 }}>
-              <span style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{b.name}</span>
-              <button onClick={() => persist({ ...session, businesses: session.businesses.filter(x => x.id !== b.id) })}
-                style={{ background: "none", border: "none", color: "#e53935", cursor: "pointer", fontWeight: 700, fontSize: 16 }}>×</button>
-            </div>
-          ))}
-          {session.businesses.length === 0 && <p style={{ color: "#aaa", textAlign: "center", fontSize: 13 }}>Sin negocios</p>}
-        </div>
-      </div>
-
-      {/* Participantes */}
-      <div style={{ background: "var(--color-background-primary)", borderRadius: 12, padding: 20, boxShadow: "0 2px 8px rgba(0,0,0,.07)" }}>
-        <h3 style={{ margin: "0 0 14px", color: "#1a237e", fontSize: 16 }}>👥 Participantes</h3>
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          <input value={partInput} onChange={e => setPartInput(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && addPart()}
-            placeholder="Nombre del participante..."
-            style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #ddd", fontSize: 13 }}
-          />
-          <button onClick={addPart} style={{ padding: "8px 14px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, cursor: "pointer" }}>+</button>
-        </div>
-        <div style={{ maxHeight: 280, overflowY: "auto" }}>
-          {pids.map((pid, i) => {
-            const p = session.participants[pid];
-            return (
-              <div key={pid} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "#f5f5f5", borderRadius: 8, marginBottom: 6 }}>
-                <div style={{ width: 10, height: 10, borderRadius: "50%", background: colorMap[pid], flexShrink: 0 }} />
-                <span style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{p.label}</span>
-                <button onClick={() => { const ps = { ...session.participants }; delete ps[pid]; persist({ ...session, participants: ps }); }}
-                  style={{ background: "none", border: "none", color: "#e53935", cursor: "pointer", fontWeight: 700, fontSize: 16 }}>×</button>
-              </div>
-            );
-          })}
-          {pids.length === 0 && <p style={{ color: "#aaa", textAlign: "center", fontSize: 13 }}>Sin participantes</p>}
-        </div>
-      </div>
-
-      <div style={{ gridColumn: "1/-1", textAlign: "center" }}>
-        <button
-          onClick={startVoting}
-          disabled={session.businesses.length === 0 || pids.length === 0}
-          style={{
-            padding: "13px 36px", fontSize: 16, fontWeight: 700,
-            background: session.businesses.length > 0 && pids.length > 0 ? "#2e7d32" : "#ccc",
-            color: "#fff", border: "none", borderRadius: 12, cursor: session.businesses.length > 0 && pids.length > 0 ? "pointer" : "not-allowed",
-          }}
-        >
-          ▶ Iniciar Votación
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // ── PANEL: Votación ───────────────────────────────────────────
 function VotingPanel({ session, persist, role, colorMap, readOnly }) {
-  const [selected, setSelected] = useState(null); // biz seleccionado
+  const [dragging, setDragging] = useState(null);
+  const ghostRef = useRef(null);
   const mat = session.votes[role] ? JSON.parse(JSON.stringify(session.votes[role])) : emptyMatrix();
   const placed = mat.flat(2).map(b => b.id);
   const unplaced = session.businesses.filter(b => !placed.includes(b.id));
   const color = colorMap[role];
-  const canInteract = !readOnly && session.votingOpen;
+  const canDrag = !readOnly && session.votingOpen;
 
-  const rowLabels = ["Alto","Medio","Bajo"];
-  const colLabels = ["Débil","Media","Fuerte"];
+  // ── Ghost element para touch drag ─────────────────────────
+  useEffect(() => {
+    const ghost = document.createElement("div");
+    ghost.style.cssText = "position:fixed;pointerEvents:none;zIndex:9999;background:" + color + ";color:#fff;padding:4px 10px;borderRadius:8px;fontSize:13px;fontWeight:700;opacity:0.85;display:none;transform:translate(-50%,-50%)";
+    document.body.appendChild(ghost);
+    ghostRef.current = ghost;
+    return () => document.body.removeChild(ghost);
+  }, [color]);
 
-  const cellBg = (r, c) => {
-    if (r===0&&c===2) return "#c8e6c9";
-    if ((r===0&&c===1)||(r===1&&c===2)) return "#fff9c4";
-    if (r===2&&c===0) return "#ffcdd2";
-    if (r===1&&c===1) return "#ffe0b2";
-    return "#f0f0f0";
+  const showGhost = (text, x, y) => {
+    const g = ghostRef.current;
+    if (!g) return;
+    g.textContent = text;
+    g.style.display = "block";
+    g.style.left = x + "px";
+    g.style.top = y + "px";
   };
 
-  // Obtener posición actual del negocio en la matriz
-  const getBizCell = (biz) => {
-    for (let r=0;r<3;r++) for (let c=0;c<3;c++) {
-      if (mat[r][c].find(b=>b.id===biz.id)) return {r,c};
+  const hideGhost = () => {
+    if (ghostRef.current) ghostRef.current.style.display = "none";
+  };
+
+  // ── Touch handlers ─────────────────────────────────────────
+  const onTouchStart = (biz, fromCell) => e => {
+    if (!canDrag) return;
+    e.stopPropagation();
+    _touchDragData = { biz, fromCell };
+    setDragging({ biz, fromCell });
+    const t = e.touches[0];
+    showGhost(biz.name, t.clientX, t.clientY);
+  };
+
+  const onTouchMove = e => {
+    if (!_touchDragData) return;
+    e.preventDefault();
+    const t = e.touches[0];
+    showGhost(_touchDragData.biz.name, t.clientX, t.clientY);
+  };
+
+  const onTouchEnd = (fromUnplaced) => e => {
+    if (!_touchDragData) return;
+    hideGhost();
+    // Si suelta sobre zona "sin ubicar" y venía de una celda → quitar
+    if (fromUnplaced && _touchDragData.fromCell) {
+      const d = _touchDragData;
+      _touchDragData = null;
+      setDragging(null);
+      const nm = JSON.parse(JSON.stringify(mat));
+      const [fr, fc] = d.fromCell;
+      nm[fr][fc] = nm[fr][fc].filter(b => b.id !== d.biz.id);
+      persist({ ...session, votes: { ...session.votes, [role]: nm } });
+      return;
     }
-    return null;
+    _touchDragData = null;
+    setDragging(null);
   };
 
-  // Mover negocio a cuadrante
-  const moveTo = (biz, r, c) => {
+  // ── Drop handlers (mouse + touch) ─────────────────────────
+  const handleDrop = (e, r, c) => {
+    if (e) e.preventDefault();
+    const d = dragging || _touchDragData;
+    if (!d || !canDrag) return;
     const nm = JSON.parse(JSON.stringify(mat));
-    // Quitar de donde esté
-    for (let rr=0;rr<3;rr++) for (let cc=0;cc<3;cc++) {
-      nm[rr][cc] = nm[rr][cc].filter(b=>b.id!==biz.id);
-    }
-    nm[r][c].push(biz);
+    if (d.fromCell) { const [fr, fc] = d.fromCell; nm[fr][fc] = nm[fr][fc].filter(b => b.id !== d.biz.id); }
+    nm[r][c].push(d.biz);
     persist({ ...session, votes: { ...session.votes, [role]: nm } });
-    setSelected(null);
+    setDragging(null);
+    _touchDragData = null;
+    hideGhost();
   };
 
-  // Quitar de la matriz (volver a sin ubicar)
-  const removeFromMatrix = (biz) => {
+  const handleDropUnplaced = e => {
+    if (e) e.preventDefault();
+    const d = dragging || _touchDragData;
+    if (!d || !d.fromCell || !canDrag) return;
     const nm = JSON.parse(JSON.stringify(mat));
-    for (let rr=0;rr<3;rr++) for (let cc=0;cc<3;cc++) {
-      nm[rr][cc] = nm[rr][cc].filter(b=>b.id!==biz.id);
-    }
+    const [fr, fc] = d.fromCell;
+    nm[fr][fc] = nm[fr][fc].filter(b => b.id !== d.biz.id);
     persist({ ...session, votes: { ...session.votes, [role]: nm } });
-    setSelected(null);
+    setDragging(null);
+    _touchDragData = null;
+    hideGhost();
   };
 
   return (
-    <div>
-      {/* Header */}
-      <div style={{ marginBottom:14, padding:"10px 16px", background:"#e8f5e9", borderRadius:10, display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
-        <div style={{ width:12, height:12, borderRadius:"50%", background:color }} />
-        <span style={{ fontWeight:700, fontSize:14 }}>{session.participants[role]?.name || session.participants[role]?.label}</span>
-        <span style={{ marginLeft:"auto", fontSize:12, color:"#666" }}>{placed.length}/{session.businesses.length} ubicados</span>
-        {!session.votingOpen && <span style={{ fontSize:12, background:"#ffcdd2", color:"#c62828", padding:"2px 10px", borderRadius:20, fontWeight:700 }}>🔒 Cerrada</span>}
+    <div onTouchMove={onTouchMove}>
+      <div style={{ marginBottom: 14, padding: "10px 16px", background: "#e8f5e9", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ width: 12, height: 12, borderRadius: "50%", background: color }} />
+        <span style={{ fontWeight: 700, fontSize: 14 }}>{session.participants[role]?.name || session.participants[role]?.label}</span>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "#666" }}>{placed.length}/{session.businesses.length} ubicados</span>
+        {!session.votingOpen && <span style={{ fontSize: 12, background: "#ffcdd2", color: "#c62828", padding: "2px 10px", borderRadius: 20, fontWeight: 700 }}>🔒 Cerrada</span>}
       </div>
 
-      {canInteract ? (
-        /* ── MODO INTERACTIVO: lista de negocios + grilla de botones ── */
-        <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
-
-          {/* Lista de negocios */}
-          <div style={{ background:"#fafafa", borderRadius:12, padding:14, border:"1px solid #eee" }}>
-            <div style={{ fontSize:12, fontWeight:700, color:"#888", marginBottom:10 }}>NEGOCIOS — tocá uno para ubicarlo</div>
-            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-              {session.businesses.map(b => {
-                const cell = getBizCell(b);
-                const isSelected = selected?.id === b.id;
-                return (
-                  <button key={b.id}
-                    onClick={() => setSelected(isSelected ? null : b)}
-                    style={{
-                      display:"flex", alignItems:"center", gap:10,
-                      padding:"10px 14px", borderRadius:10, border:"none",
-                      background: isSelected ? color : cell ? "#e8f5e9" : "#fff",
-                      boxShadow: isSelected ? `0 0 0 3px ${color}` : "0 1px 4px rgba(0,0,0,.1)",
-                      cursor:"pointer", textAlign:"left", transition:"all .15s",
-                    }}>
-                    <span style={{ flex:1, fontWeight:700, fontSize:14, color: isSelected ? "#fff" : "#333" }}>{b.name}</span>
-                    {cell
-                      ? <span style={{ fontSize:11, background: isSelected?"rgba(255,255,255,.3)":"#c8e6c9", color: isSelected?"#fff":"#2e7d32", padding:"2px 8px", borderRadius:20, fontWeight:700 }}>
-                          {rowLabels[cell.r]} / {colLabels[cell.c]}
-                        </span>
-                      : <span style={{ fontSize:11, color: isSelected?"rgba(255,255,255,.7)":"#aaa" }}>Sin ubicar</span>
-                    }
-                  </button>
-                );
-              })}
+      <div
+        onDragOver={e => e.preventDefault()}
+        onDrop={handleDropUnplaced}
+        onTouchEnd={onTouchEnd(true)}
+        style={{ minHeight: 52, padding: 10, background: "#fafafa", borderRadius: 10, border: "2px dashed #ddd", marginBottom: 14, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+        <span style={{ fontSize: 11, color: "#aaa", fontWeight: 700, marginRight: 4 }}>SIN UBICAR:</span>
+        {unplaced.length === 0
+          ? <span style={{ fontSize: 12, color: "#4caf50", fontWeight: 700 }}>✓ Todos ubicados</span>
+          : unplaced.map(b => (
+            <div key={b.id}
+              draggable={canDrag}
+              onDragStart={e => { if (canDrag) { setDragging({ biz: b, fromCell: null }); e.dataTransfer.effectAllowed = "move"; } }}
+              onDragEnd={() => setDragging(null)}
+              onTouchStart={onTouchStart(b, null)}
+              onTouchEnd={onTouchEnd(false)}
+              style={{ touchAction: "none" }}
+            >
+              <BizCard business={b} color={color} />
             </div>
-          </div>
+          ))
+        }
+      </div>
 
-          {/* Grilla de cuadrantes — solo visible cuando hay algo seleccionado */}
-          {selected && (
-            <div style={{ background:"#e3f2fd", borderRadius:12, padding:14, border:"2px solid #1976d2" }}>
-              <div style={{ fontSize:13, fontWeight:700, color:"#1565c0", marginBottom:12, textAlign:"center" }}>
-                ¿Dónde va <span style={{ background:color, color:"#fff", padding:"1px 10px", borderRadius:20 }}>{selected.name}</span>?
-              </div>
-              {/* Col headers */}
-              <div style={{ display:"grid", gridTemplateColumns:"52px 1fr 1fr 1fr", gap:4, marginBottom:4 }}>
-                <div/>
-                {colLabels.map(l=><div key={l} style={{ textAlign:"center", fontSize:11, fontWeight:700, color:"#555", background:"#ddd", borderRadius:4, padding:"3px 0" }}>{l}</div>)}
-              </div>
-              {/* Rows */}
-              {rowLabels.map((rl,r)=>(
-                <div key={r} style={{ display:"grid", gridTemplateColumns:"52px 1fr 1fr 1fr", gap:4, marginBottom:4 }}>
-                  <div style={{ display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:700, color:"#555", background:"#ddd", borderRadius:4 }}>{rl}</div>
-                  {colLabels.map((_,c)=>(
-                    <button key={c} onClick={()=>moveTo(selected,r,c)}
-                      style={{ background:cellBg(r,c), border:"2px solid transparent", borderRadius:8, padding:"16px 4px", fontSize:11, fontWeight:700, color:"#444", cursor:"pointer", transition:"border .1s, transform .1s", lineHeight:1.2 }}
-                      onMouseEnter={e=>{e.currentTarget.style.border="2px solid #1976d2";e.currentTarget.style.transform="scale(1.05)";}}
-                      onMouseLeave={e=>{e.currentTarget.style.border="2px solid transparent";e.currentTarget.style.transform="scale(1)";}}>
-                      {rl}<br/>{colLabels[c]}
-                    </button>
-                  ))}
-                </div>
-              ))}
-              {/* Botón quitar */}
-              {getBizCell(selected) && (
-                <button onClick={()=>removeFromMatrix(selected)}
-                  style={{ marginTop:8, width:"100%", padding:"8px", background:"#fff", border:"1px solid #ddd", borderRadius:8, fontSize:12, fontWeight:700, color:"#e53935", cursor:"pointer" }}>
-                  × Quitar de la matriz
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Vista de la matriz (solo lectura, para referencia) */}
-          <div>
-            <div style={{ fontSize:12, fontWeight:700, color:"#888", marginBottom:8 }}>TU MATRIZ ACTUAL</div>
-            <MatrixBoard matrix={mat} onDrop={()=>{}} readOnly
-              renderCell={(r,c,cell)=>cell.map(b=>(
-                <div key={b.id}><BizCard business={b} color={color} small /></div>
-              ))}
-            />
+      <MatrixBoard matrix={mat} onDrop={handleDrop} readOnly={!canDrag}
+        renderCell={(r, c, cell) => cell.map(b => (
+          <div key={b.id}
+            draggable={canDrag}
+            onDragStart={e => { if (canDrag) { setDragging({ biz: b, fromCell: [r, c] }); e.dataTransfer.effectAllowed = "move"; } }}
+            onDragEnd={() => setDragging(null)}
+            onTouchStart={onTouchStart(b, [r, c])}
+            onTouchEnd={onTouchEnd(false)}
+            style={{ touchAction: "none" }}
+          >
+            <BizCard business={b} color={color} small />
           </div>
-        </div>
-      ) : (
-        /* ── MODO SOLO LECTURA ── */
-        <div>
-          <div style={{ minHeight:52, padding:10, background:"#fafafa", borderRadius:10, border:"2px dashed #ddd", marginBottom:14, display:"flex", flexWrap:"wrap", gap:8, alignItems:"center" }}>
-            <span style={{ fontSize:11, color:"#aaa", fontWeight:700, marginRight:4 }}>SIN UBICAR:</span>
-            {unplaced.length===0
-              ? <span style={{ fontSize:12, color:"#4caf50", fontWeight:700 }}>✓ Todos ubicados</span>
-              : unplaced.map(b=><div key={b.id}><BizCard business={b} color={color}/></div>)
-            }
-          </div>
-          <MatrixBoard matrix={mat} onDrop={()=>{}} readOnly
-            renderCell={(r,c,cell)=>cell.map(b=>(
-              <div key={b.id}><BizCard business={b} color={color} small /></div>
-            ))}
-          />
-        </div>
-      )}
+        ))}
+      />
+      {canDrag && <p style={{ textAlign: "center", fontSize: 12, color: "#888", marginTop: 10 }}>Arrastrá cada tarjeta a la celda correspondiente en la matriz</p>}
     </div>
   );
 }
