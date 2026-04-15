@@ -10,8 +10,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 // ── CONFIGURACIÓN SUPABASE ──────────────────────────────────
 // Reemplazá con tus credenciales reales de Supabase
-const SUPABASE_URL = "https://jawuvexpnrzgschkhbom.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_FXjDmTEoZd9L9BpFbhjypA_eFeKVQMA";
+const SUPABASE_URL = "https://TU-PROYECTO.supabase.co";
+const SUPABASE_ANON_KEY = "TU-ANON-KEY";
 
 // ── CONSTANTES ──────────────────────────────────────────────
 const ADMIN_PASSWORD = "admin2024";
@@ -815,37 +815,228 @@ function DiscussionPanel({ session, persist, role, colorMap, isAdmin }) {
   );
 }
 
+// ── HELPERS DE DESVÍO ─────────────────────────────────────────
+// Distancia euclidiana entre dos posiciones (r,c) en la matriz 3x3
+function distancia(p1, p2) {
+  if (!p1 || !p2) return null;
+  return Math.sqrt(Math.pow(p1.r - p2.r, 2) + Math.pow(p1.c - p2.c, 2));
+}
+// Desvío máximo posible en una grilla 3x3 = diagonal = sqrt(8) ≈ 2.83
+const MAX_DIST = Math.sqrt(8);
+
+// Convierte distancia a porcentaje de desvío (0% = idéntico, 100% = máximo desvío)
+function pctDesvio(dist) {
+  if (dist === null) return null;
+  return Math.round((dist / MAX_DIST) * 100);
+}
+
+// Color semáforo según % de desvío
+function colorDesvio(pct) {
+  if (pct === null) return "#aaa";
+  if (pct <= 20) return "#2e7d32";   // verde — muy alineado
+  if (pct <= 45) return "#f57c00";   // naranja — desvío moderado
+  return "#c62828";                   // rojo — desvío alto
+}
+
+function labelDesvio(pct) {
+  if (pct === null) return "Sin datos";
+  if (pct <= 20) return "Muy alineado";
+  if (pct <= 45) return "Desvío moderado";
+  return "Desvío alto";
+}
+
+// Barra visual de desvío
+function BarraDesvio({ pct, color }) {
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={{ background: "#eee", borderRadius: 20, height: 8, overflow: "hidden" }}>
+        <div style={{ width: `${pct ?? 0}%`, background: color, height: "100%", borderRadius: 20, transition: "width .4s" }} />
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#aaa", marginTop: 2 }}>
+        <span>0%</span><span>50%</span><span>100%</span>
+      </div>
+    </div>
+  );
+}
+
 // ── PANEL: Results ────────────────────────────────────────────
-function ResultsPanel({ session }) {
+function ResultsPanel({ session, colorMap }) {
   const pids = Object.keys(session.participants);
+  const rowL = ["Alto","Medio","Bajo"], colL = ["Débil","Media","Fuerte"];
+
+  // Calcular posición promedio por negocio
   const avgPos = {};
   session.businesses.forEach(b => { avgPos[b.id] = { r: 0, c: 0, count: 0 }; });
   pids.forEach(pid => {
     const mat = session.votes[pid] || emptyMatrix();
-    mat.forEach((row, r) => row.forEach((cell, c) => cell.forEach(b => { avgPos[b.id].r += r; avgPos[b.id].c += c; avgPos[b.id].count++; })));
+    mat.forEach((row, r) => row.forEach((cell, c) => cell.forEach(b => {
+      avgPos[b.id].r += r; avgPos[b.id].c += c; avgPos[b.id].count++;
+    })));
   });
+
+  // Posición promedio exacta (sin redondear, para cálculo de desvíos)
+  const avgExacto = {};
+  session.businesses.forEach(b => {
+    const a = avgPos[b.id];
+    avgExacto[b.id] = a.count > 0 ? { r: a.r / a.count, c: a.c / a.count } : null;
+  });
+
+  // Matriz promedio redondeada (para mostrar)
   const avgMatrix = emptyMatrix();
   session.businesses.forEach(b => {
     const a = avgPos[b.id];
     if (a.count > 0) { const r = Math.round(a.r / a.count), c = Math.round(a.c / a.count); avgMatrix[r][c].push(b); }
   });
-  const rowL = ["Alto","Medio","Bajo"], colL = ["Débil","Media","Fuerte"];
+
+  // ── INDICADOR 1: Desvío individual vs promedio ────────────────
+  // Para cada participante: promedio de distancias de sus votos al promedio grupal
+  const desvioIndividual = {};
+  pids.forEach(pid => {
+    const mat = session.votes[pid] || emptyMatrix();
+    let totalDist = 0, count = 0;
+    session.businesses.forEach(b => {
+      const avg = avgExacto[b.id];
+      if (!avg) return;
+      // Posición votada por este participante
+      let voted = null;
+      mat.forEach((row, r) => row.forEach((cell, c) => { if (cell.find(x => x.id === b.id)) voted = { r, c }; }));
+      if (voted) { totalDist += distancia(voted, avg); count++; }
+    });
+    desvioIndividual[pid] = count > 0 ? pctDesvio(totalDist / count) : null;
+  });
+
+  // Desvío global del grupo (promedio de todos los individuales)
+  const desviosValidos = Object.values(desvioIndividual).filter(v => v !== null);
+  const desvioGrupo = desviosValidos.length > 0 ? Math.round(desviosValidos.reduce((a,b) => a+b, 0) / desviosValidos.length) : null;
+
+  // ── INDICADOR 2: Desvío consenso vs promedio ──────────────────
+  let totalDistConsensus = 0, countConsensus = 0;
+  const desvioConsensoDetalle = {};
+  session.businesses.forEach(b => {
+    const avg = avgExacto[b.id];
+    if (!avg) return;
+    let cons = null;
+    session.consensusMatrix.forEach((row, r) => row.forEach((cell, c) => { if (cell.find(x => x.id === b.id)) cons = { r, c }; }));
+    if (cons) {
+      const d = distancia(cons, avg);
+      totalDistConsensus += d;
+      countConsensus++;
+      desvioConsensoDetalle[b.id] = { pct: pctDesvio(d), cons, avg };
+    } else {
+      desvioConsensoDetalle[b.id] = null;
+    }
+  });
+  const desvioConsensoPct = countConsensus > 0 ? pctDesvio(totalDistConsensus / countConsensus) : null;
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
-      <div>
-        <h3 style={{ textAlign: "center", color: "#1b5e20", margin: "0 0 12px", fontSize: 15 }}>✅ Matriz Consensuada</h3>
-        <MatrixBoard matrix={session.consensusMatrix} onDrop={() => {}} readOnly
-          renderCell={(r, c, cell) => cell.map((b, i) => <div key={i}><BizCard business={b} color="#2e7d32" small /></div>)}
-        />
+    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+
+      {/* ── MATRICES ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+        <div>
+          <h3 style={{ textAlign: "center", color: "#1b5e20", margin: "0 0 12px", fontSize: 15 }}>✅ Matriz Consensuada</h3>
+          <MatrixBoard matrix={session.consensusMatrix} onDrop={() => {}} readOnly
+            renderCell={(r, c, cell) => cell.map((b, i) => <div key={i}><BizCard business={b} color="#2e7d32" small /></div>)}
+          />
+        </div>
+        <div>
+          <h3 style={{ textAlign: "center", color: "#1565c0", margin: "0 0 12px", fontSize: 15 }}>📊 Matriz Promedio de votos</h3>
+          <MatrixBoard matrix={avgMatrix} onDrop={() => {}} readOnly
+            renderCell={(r, c, cell) => cell.map((b, i) => <div key={i}><BizCard business={b} color="#1565c0" small /></div>)}
+          />
+        </div>
       </div>
-      <div>
-        <h3 style={{ textAlign: "center", color: "#1565c0", margin: "0 0 12px", fontSize: 15 }}>📊 Matriz Promedio de votos</h3>
-        <MatrixBoard matrix={avgMatrix} onDrop={() => {}} readOnly
-          renderCell={(r, c, cell) => cell.map((b, i) => <div key={i}><BizCard business={b} color="#1565c0" small /></div>)}
-        />
+
+      {/* ── INDICADOR 1: Desvío individual vs promedio ── */}
+      <div style={{ background: "#fff", borderRadius: 14, padding: 22, boxShadow: "0 2px 8px rgba(0,0,0,.07)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
+          <span style={{ fontSize: 20 }}>📐</span>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 15, color: "#333" }}>Desvío individual vs matriz promedio</h3>
+            <p style={{ margin: 0, fontSize: 12, color: "#888" }}>Qué tan lejos votó cada participante respecto al promedio del grupo (0% = idéntico, 100% = máximo desvío)</p>
+          </div>
+          {desvioGrupo !== null && (
+            <div style={{ marginLeft: "auto", textAlign: "center", background: colorDesvio(desvioGrupo) + "18", borderRadius: 12, padding: "8px 16px", border: `1px solid ${colorDesvio(desvioGrupo)}40` }}>
+              <div style={{ fontSize: 22, fontWeight: 900, color: colorDesvio(desvioGrupo) }}>{desvioGrupo}%</div>
+              <div style={{ fontSize: 11, color: "#666", fontWeight: 700 }}>Desvío promedio del grupo</div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {pids.map(pid => {
+            const p = session.participants[pid];
+            const pct = desvioIndividual[pid];
+            const color = colorDesvio(pct);
+            return (
+              <div key={pid} style={{ background: "#fafafa", borderRadius: 10, padding: "12px 16px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                  <div style={{ width: 10, height: 10, borderRadius: "50%", background: colorMap[pid], flexShrink: 0 }} />
+                  <span style={{ fontWeight: 700, fontSize: 14, flex: 1 }}>{p.name || p.label}</span>
+                  {pct !== null ? (
+                    <>
+                      <span style={{ fontSize: 20, fontWeight: 900, color }}>{pct}%</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color, background: color + "18", padding: "2px 10px", borderRadius: 20 }}>{labelDesvio(pct)}</span>
+                    </>
+                  ) : (
+                    <span style={{ fontSize: 12, color: "#aaa" }}>Sin votos</span>
+                  )}
+                </div>
+                <BarraDesvio pct={pct} color={color} />
+              </div>
+            );
+          })}
+        </div>
       </div>
-      <div style={{ gridColumn: "1/-1", background: "var(--color-background-primary)", borderRadius: 12, padding: 20, boxShadow: "0 2px 8px rgba(0,0,0,.07)" }}>
+
+      {/* ── INDICADOR 2: Desvío consenso vs promedio ── */}
+      <div style={{ background: "#fff", borderRadius: 14, padding: 22, boxShadow: "0 2px 8px rgba(0,0,0,.07)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
+          <span style={{ fontSize: 20 }}>🎯</span>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 15, color: "#333" }}>Desvío del acuerdo final vs matriz promedio</h3>
+            <p style={{ margin: 0, fontSize: 12, color: "#888" }}>Qué tan lejos quedó el consenso respecto al promedio matemático de los votos</p>
+          </div>
+          {desvioConsensoPct !== null && (
+            <div style={{ marginLeft: "auto", textAlign: "center", background: colorDesvio(desvioConsensoPct) + "18", borderRadius: 12, padding: "8px 16px", border: `1px solid ${colorDesvio(desvioConsensoPct)}40` }}>
+              <div style={{ fontSize: 22, fontWeight: 900, color: colorDesvio(desvioConsensoPct) }}>{desvioConsensoPct}%</div>
+              <div style={{ fontSize: 11, color: "#666", fontWeight: 700 }}>Desvío global del consenso</div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+          {session.businesses.map(b => {
+            const det = desvioConsensoDetalle[b.id];
+            const avg = avgExacto[b.id];
+            const avgRound = avg ? { r: Math.round(avg.r), c: Math.round(avg.c) } : null;
+            if (!det) return (
+              <div key={b.id} style={{ background: "#f5f5f5", borderRadius: 10, padding: "12px 14px", minWidth: 180 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{b.name}</div>
+                <div style={{ fontSize: 12, color: "#aaa" }}>Sin datos de consenso</div>
+              </div>
+            );
+            const color = colorDesvio(det.pct);
+            return (
+              <div key={b.id} style={{ background: "#fafafa", borderRadius: 10, padding: "12px 14px", minWidth: 180, flex: "1 1 180px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                  <span style={{ fontWeight: 700, fontSize: 13 }}>{b.name}</span>
+                  <span style={{ fontSize: 18, fontWeight: 900, color }}>{det.pct}%</span>
+                </div>
+                <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>
+                  <span style={{ color: "#2e7d32" }}>✅ Consenso: {rowL[det.cons.r]} / {colL[det.cons.c]}</span><br />
+                  <span style={{ color: "#1565c0" }}>📊 Promedio: {avgRound ? `${rowL[avgRound.r]} / ${colL[avgRound.c]}` : "—"}</span>
+                </div>
+                <BarraDesvio pct={det.pct} color={color} />
+                <div style={{ fontSize: 11, fontWeight: 700, color, marginTop: 4 }}>{labelDesvio(det.pct)}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── COMPARACIÓN POR NEGOCIO (existente) ── */}
+      <div style={{ background: "#fff", borderRadius: 14, padding: 22, boxShadow: "0 2px 8px rgba(0,0,0,.07)" }}>
         <h3 style={{ margin: "0 0 14px", color: "#333", fontSize: 15 }}>🔍 Comparación por negocio</h3>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
           {session.businesses.map(b => {
@@ -867,6 +1058,7 @@ function ResultsPanel({ session }) {
           })}
         </div>
       </div>
+
     </div>
   );
 }
@@ -980,7 +1172,7 @@ export default function App() {
       );
       if (session.phase === PHASES.REVEAL) return <RevealPanel session={session} colorMap={colorMap} />;
       if (session.phase === PHASES.DISCUSSION) return <DiscussionPanel session={session} persist={persist} role={resolvedRole} colorMap={colorMap} isAdmin />;
-      if (session.phase === PHASES.RESULTS) return <ResultsPanel session={session} />;
+      if (session.phase === PHASES.RESULTS) return <ResultsPanel session={session} colorMap={colorMap} />;
     } else {
       if (session.phase === PHASES.SETUP) return <div style={{ textAlign: "center", padding: 48, color: "#888" }}>⏳ Esperando que el administrador configure la sesión...</div>;
       if (session.phase === PHASES.VOTING) return <VotingPanel session={session} persist={persist} role={resolvedRole} colorMap={colorMap} readOnly={false} />;
@@ -993,7 +1185,7 @@ export default function App() {
         </div>
       );
       if (session.phase === PHASES.DISCUSSION) return <DiscussionPanel session={session} persist={persist} role={resolvedRole} colorMap={colorMap} isAdmin={false} />;
-      if (session.phase === PHASES.RESULTS) return <ResultsPanel session={session} />;
+      if (session.phase === PHASES.RESULTS) return <ResultsPanel session={session} colorMap={colorMap} />;
     }
   };
 
