@@ -229,27 +229,39 @@ function MatrixBoard({ matrix, onDrop, renderCell, readOnly }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <div style={{ display: "flex", marginLeft: 68 }}>
+
+      {/* Título eje X */}
+      <div style={{ display: "flex", marginLeft: 92 }}>
+        <div style={{ flex: 1, textAlign: "center", fontSize: 11, fontWeight: 800, color: "#fff", background: "#1565c0", borderRadius: "8px 8px 0 0", padding: "5px 0", letterSpacing: 0.5 }}>
+          ← Fortaleza competitiva →
+        </div>
+      </div>
+
+      {/* Headers columnas */}
+      <div style={{ display: "flex", marginLeft: 92 }}>
         {colLabels.map((l, i) => (
-          <div key={l} style={{
-            flex: 1, textAlign: "center", fontSize: 11, color: "#555",
-            fontWeight: 700, padding: "5px 0",
-            background: ["#e8f4f8","#d4eaf5","#bde0f0"][i],
-            borderRadius: i === 0 ? "6px 0 0 0" : i === 2 ? "0 6px 0 0" : 0,
-          }}>{l}</div>
+          <div key={l} style={{ flex: 1, textAlign: "center", fontSize: 11, color: "#1565c0", fontWeight: 700, padding: "5px 0", background: ["#e8f4f8","#d4eaf5","#bde0f0"][i] }}>{l}</div>
         ))}
       </div>
+
       <div style={{ display: "flex", alignItems: "stretch" }}>
-        <div style={{ display: "flex", flexDirection: "column", width: 68, gap: 2 }}>
+
+        {/* Título eje Y rotado */}
+        <div style={{ width: 22, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <div style={{ transform: "rotate(-90deg)", whiteSpace: "nowrap", fontSize: 11, fontWeight: 800, color: "#fff", background: "#6a1b9a", padding: "4px 12px", borderRadius: 6, letterSpacing: 0.5 }}>
+            ← Atractivo del mercado →
+          </div>
+        </div>
+
+        {/* Labels filas */}
+        <div style={{ display: "flex", flexDirection: "column", width: 68, gap: 2, marginLeft: 2 }}>
           {rowLabels.map(l => (
-            <div key={l} style={{
-              flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 11, fontWeight: 700, color: "#666",
-              background: "#f0ece8", borderRadius: 6, minHeight: 88,
-            }}>{l}</div>
+            <div key={l} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#6a1b9a", background: "#f3e5f5", borderRadius: 6, minHeight: 88 }}>{l}</div>
           ))}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", flex: 1, gap: 2 }}>
+
+        {/* Celdas */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", flex: 1, gap: 2, marginLeft: 2 }}>
           {matrix.map((row, r) => row.map((cell, c) => {
             const key = `${r}-${c}`;
             return (
@@ -277,9 +289,6 @@ function MatrixBoard({ matrix, onDrop, renderCell, readOnly }) {
             );
           }))}
         </div>
-      </div>
-      <div style={{ marginLeft: 68, fontSize: 10, color: "#aaa", textAlign: "center", padding: "2px 0" }}>
-        ← Fortaleza competitiva →
       </div>
     </div>
   );
