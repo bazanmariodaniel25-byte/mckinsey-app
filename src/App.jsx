@@ -279,7 +279,6 @@ function LoginScreen({ onLogin }) {
   const [companyName, setCompanyName] = useState("");
   const [companyId, setCompanyId] = useState("");
   const [participantName, setParticipantName] = useState("");
-  const [participantCode, setParticipantCode] = useState("");
   const [adminPass, setAdminPass] = useState("");
   const [err, setErr] = useState("");
   const [companies, setCompanies] = useState([]);
@@ -319,11 +318,8 @@ function LoginScreen({ onLogin }) {
 
   const joinAsParticipant = async (cid, cname) => {
     const name = participantName.trim();
-    const code = participantCode.trim().toUpperCase();
     if (!name) { setErr("Ingresá tu nombre"); return; }
-    if (!code) { setErr("Ingresá el código"); return; }
-    // La validación del código se hace en la app con los datos de sesión
-    onLogin({ companyId: cid, companyName: cname, role: "participant", name, code });
+    onLogin({ companyId: cid, companyName: cname, role: "participant", name });
   };
 
   return (
@@ -457,13 +453,9 @@ function LoginScreen({ onLogin }) {
                 </div>
                 <input
                   value={participantName} onChange={e => setParticipantName(e.target.value)}
-                  placeholder="Tu nombre"
+                  onKeyDown={e => e.key === "Enter" && joinAsParticipant(companyId, companies.find(c => c.id === companyId)?.name)}
+                  placeholder="Tu nombre completo"
                   style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #dde", fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
-                />
-                <input
-                  value={participantCode} onChange={e => setParticipantCode(e.target.value.toUpperCase())}
-                  placeholder="Código de sesión (ej: AB3X)"
-                  style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #dde", fontSize: 13, marginBottom: 8, boxSizing: "border-box", letterSpacing: 2, fontWeight: 700 }}
                 />
                 <button
                   onClick={() => joinAsParticipant(companyId, companies.find(c => c.id === companyId)?.name)}
@@ -512,8 +504,8 @@ function SetupPanel({ session, persist, colorMap }) {
   };
   const addPart = () => {
     const v = partInput.trim(); if (!v) return;
-    const pid = uid(), code = Math.random().toString(36).slice(2,6).toUpperCase();
-    persist({ ...session, participants: { ...session.participants, [pid]: { label: v, name: "", code } } });
+    const pid = uid();
+    persist({ ...session, participants: { ...session.participants, [pid]: { label: v, name: "" } } });
     setPartInput("");
   };
   const startVoting = () => {
@@ -565,15 +557,8 @@ function SetupPanel({ session, persist, colorMap }) {
               <div key={pid} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "#f5f5f5", borderRadius: 8, marginBottom: 6 }}>
                 <div style={{ width: 10, height: 10, borderRadius: "50%", background: colorMap[pid], flexShrink: 0 }} />
                 <span style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{p.label}</span>
-                <span style={{
-                  fontSize: 13, letterSpacing: 2, fontWeight: 900,
-                  background: "#e3f2fd", color: "#1565c0",
-                  padding: "2px 10px", borderRadius: 20,
-                }}>{p.code}</span>
-                <button onClick={() => {
-                  const ps = { ...session.participants }; delete ps[pid];
-                  persist({ ...session, participants: ps });
-                }} style={{ background: "none", border: "none", color: "#e53935", cursor: "pointer", fontWeight: 700, fontSize: 16 }}>×</button>
+                <button onClick={() => { const ps = { ...session.participants }; delete ps[pid]; persist({ ...session, participants: ps }); }}
+                  style={{ background: "none", border: "none", color: "#e53935", cursor: "pointer", fontWeight: 700, fontSize: 16 }}>×</button>
               </div>
             );
           })}
@@ -1105,7 +1090,7 @@ export default function App() {
   const sessionId = `session_${companyId}`;
   const { session, persist, loading } = useSession(companyId, sessionId);
 
-  // Resolver participante por código una vez que la sesión carga
+  // Resolver participante por nombre una vez que la sesión carga
   useEffect(() => {
     if (!loginInfo || !session) return;
     if (loginInfo.role === "admin") {
@@ -1114,11 +1099,13 @@ export default function App() {
     }
     if (loginInfo.role === "participant") {
       const pids = Object.keys(session.participants);
-      const pid = pids.find(k => session.participants[k].code === loginInfo.code);
-      if (!pid) { setLoginErr("Código inválido para esta sesión."); setLoginInfo(null); return; }
-      if (session.participants[pid].name && session.participants[pid].name !== loginInfo.name) {
-        setLoginErr("El nombre no coincide con el código."); setLoginInfo(null); return;
-      }
+      // Buscar por nombre exacto (case-insensitive)
+      const pid = pids.find(k =>
+        (session.participants[k].name || session.participants[k].label)
+          .toLowerCase() === loginInfo.name.toLowerCase()
+      );
+      if (!pid) { setLoginErr(`No se encontró "${loginInfo.name}" en la lista de participantes. Pedile al admin que te agregue.`); setLoginInfo(null); return; }
+      // Guardar nombre si aún no estaba confirmado
       if (!session.participants[pid].name) {
         persist({ ...session, participants: { ...session.participants, [pid]: { ...session.participants[pid], name: loginInfo.name } } });
       }
@@ -1214,7 +1201,7 @@ export default function App() {
         </div>
 
         <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center" }}>
-          {isAdmin && <CodesPopover participants={session.participants} colorMap={colorMap} />}
+          {isAdmin && <span style={{ color: "rgba(255,255,255,.5)", fontSize: 11, background: "rgba(255,255,255,.1)", padding: "3px 10px", borderRadius: 20 }}>👑 Admin</span>}
           <span style={{ color: "rgba(255,255,255,.7)", fontSize: 12 }}>
             {isAdmin ? "👑 Admin" : (session.participants[resolvedRole]?.name || session.participants[resolvedRole]?.label || "")}
           </span>
