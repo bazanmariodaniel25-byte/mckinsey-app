@@ -10,8 +10,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 // ── CONFIGURACIÓN SUPABASE ──────────────────────────────────
 // Reemplazá con tus credenciales reales de Supabase
-const SUPABASE_URL = "https://TU-PROYECTO.supabase.co";
-const SUPABASE_ANON_KEY = "TU-ANON-KEY";
+const SUPABASE_URL = "https://jawuvexpnrzgschkhbom.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_FXjDmTEoZd9L9BpFbhjypA_eFeKVQMA";
 
 // ── CONSTANTES ──────────────────────────────────────────────
 const ADMIN_PASSWORD = "admin2024";
