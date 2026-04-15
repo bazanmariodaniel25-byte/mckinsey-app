@@ -182,23 +182,25 @@ function useSession(companyId, sessionId) {
 }
 
 // ── COMPONENTE: Card de negocio ───────────────────────────────
-function BizCard({ business, color, small }) {
+function BizCard({ business, color, small, selected }) {
   return (
     <div style={{
       background: color || "var(--color-background-primary)",
-      border: `2px solid ${color ? "rgba(0,0,0,.18)" : "var(--color-border-secondary)"}`,
+      border: selected ? "3px solid #fff" : `2px solid ${color ? "rgba(0,0,0,.18)" : "var(--color-border-secondary)"}`,
       borderRadius: 8,
       padding: small ? "3px 8px" : "6px 12px",
       fontSize: small ? 11 : 13,
       fontWeight: 600,
       color: color ? "#fff" : "var(--color-text-primary)",
-      cursor: "grab",
+      cursor: "pointer",
       userSelect: "none",
-      boxShadow: "0 2px 6px rgba(0,0,0,.13)",
+      boxShadow: selected ? `0 0 0 3px ${color || "#1976d2"}, 0 4px 12px rgba(0,0,0,.25)` : "0 2px 6px rgba(0,0,0,.13)",
       whiteSpace: "nowrap",
       maxWidth: small ? 90 : 130,
       overflow: "hidden",
       textOverflow: "ellipsis",
+      transform: selected ? "scale(1.08)" : "scale(1)",
+      transition: "transform .15s, box-shadow .15s",
     }}>
       {business.name}
     </div>
@@ -206,7 +208,7 @@ function BizCard({ business, color, small }) {
 }
 
 // ── COMPONENTE: MatrixBoard ───────────────────────────────────
-function MatrixBoard({ matrix, onDrop, renderCell, readOnly }) {
+function MatrixBoard({ matrix, onDrop, renderCell, readOnly, selected }) {
   const [dragOver, setDragOver] = useState(null);
   const rowLabels = ["Alto", "Medio", "Bajo"];
   const colLabels = ["Débil", "Media", "Fuerte"];
@@ -246,18 +248,21 @@ function MatrixBoard({ matrix, onDrop, renderCell, readOnly }) {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", flex: 1, gap: 2 }}>
           {matrix.map((row, r) => row.map((cell, c) => {
             const key = `${r}-${c}`;
+            const isTarget = selected && !readOnly;
             return (
               <div
                 key={key}
                 onDragOver={e => { if (!readOnly) { e.preventDefault(); setDragOver(key); } }}
                 onDragLeave={() => setDragOver(null)}
                 onDrop={e => { setDragOver(null); if (!readOnly) onDrop(e, r, c); }}
+                onClick={() => { if (isTarget) onDrop(null, r, c); }}
                 style={{
-                  background: dragOver === key ? "#b3d9ff" : cellBg(r, c),
+                  background: dragOver === key ? "#b3d9ff" : isTarget ? "#e3f2fd" : cellBg(r, c),
                   borderRadius: 6, minHeight: 88, padding: 6,
                   display: "flex", flexWrap: "wrap", gap: 4, alignContent: "flex-start",
-                  border: dragOver === key ? "2px dashed #2196f3" : "2px solid transparent",
+                  border: dragOver === key ? "2px dashed #2196f3" : isTarget ? "2px dashed #1976d2" : "2px solid transparent",
                   transition: "background .15s",
+                  cursor: isTarget ? "pointer" : "default",
                 }}
               >
                 {renderCell(r, c, cell)}
@@ -589,61 +594,106 @@ function SetupPanel({ session, persist, colorMap }) {
 
 // ── PANEL: Votación ───────────────────────────────────────────
 function VotingPanel({ session, persist, role, colorMap, readOnly }) {
-  const [dragging, setDragging] = useState(null);
+  const [selected, setSelected] = useState(null); // { biz, fromCell }
   const mat = session.votes[role] ? JSON.parse(JSON.stringify(session.votes[role])) : emptyMatrix();
   const placed = mat.flat(2).map(b => b.id);
   const unplaced = session.businesses.filter(b => !placed.includes(b.id));
   const color = colorMap[role];
-  const canDrag = !readOnly && session.votingOpen;
+  const canInteract = !readOnly && session.votingOpen;
 
-  const handleDrop = (e, r, c) => {
-    e.preventDefault(); if (!dragging || !canDrag) return;
+  // Colocar en cuadrante (funciona para drag y tap)
+  const placeInCell = (r, c) => {
+    if (!selected || !canInteract) return;
     const nm = JSON.parse(JSON.stringify(mat));
-    if (dragging.fromCell) { const [fr, fc] = dragging.fromCell; nm[fr][fc] = nm[fr][fc].filter(b => b.id !== dragging.biz.id); }
-    nm[r][c].push(dragging.biz);
+    if (selected.fromCell) {
+      const [fr, fc] = selected.fromCell;
+      nm[fr][fc] = nm[fr][fc].filter(b => b.id !== selected.biz.id);
+    }
+    nm[r][c].push(selected.biz);
     persist({ ...session, votes: { ...session.votes, [role]: nm } });
-    setDragging(null);
+    setSelected(null);
   };
 
-  const handleDropUnplaced = e => {
-    e.preventDefault(); if (!dragging || !dragging.fromCell || !canDrag) return;
+  // Quitar de cuadrante y volver a sin ubicar
+  const removeFromCell = (biz, r, c) => {
+    if (!canInteract) return;
+    if (selected && selected.biz.id === biz.id) { setSelected(null); return; }
     const nm = JSON.parse(JSON.stringify(mat));
-    const [fr, fc] = dragging.fromCell;
-    nm[fr][fc] = nm[fr][fc].filter(b => b.id !== dragging.biz.id);
+    nm[r][c] = nm[r][c].filter(b => b.id !== biz.id);
     persist({ ...session, votes: { ...session.votes, [role]: nm } });
-    setDragging(null);
+  };
+
+  const selectBiz = (biz, fromCell = null) => {
+    if (!canInteract) return;
+    if (selected && selected.biz.id === biz.id) { setSelected(null); return; }
+    setSelected({ biz, fromCell });
   };
 
   return (
     <div>
-      <div style={{ marginBottom: 14, padding: "10px 16px", background: "#e8f5e9", borderRadius: 10, display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ marginBottom: 14, padding: "10px 16px", background: "#e8f5e9", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <div style={{ width: 12, height: 12, borderRadius: "50%", background: color }} />
         <span style={{ fontWeight: 700, fontSize: 14 }}>{session.participants[role]?.name || session.participants[role]?.label}</span>
         <span style={{ marginLeft: "auto", fontSize: 12, color: "#666" }}>{placed.length}/{session.businesses.length} ubicados</span>
         {!session.votingOpen && <span style={{ fontSize: 12, background: "#ffcdd2", color: "#c62828", padding: "2px 10px", borderRadius: 20, fontWeight: 700 }}>🔒 Cerrada</span>}
       </div>
 
-      <div onDragOver={e => e.preventDefault()} onDrop={handleDropUnplaced}
-        style={{ minHeight: 52, padding: 10, background: "#fafafa", borderRadius: 10, border: "2px dashed #ddd", marginBottom: 14, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+      {/* Instrucción contextual */}
+      {canInteract && (
+        <div style={{ marginBottom: 10, padding: "8px 14px", background: selected ? "#e3f2fd" : "#fff8e1", borderRadius: 8, fontSize: 13, fontWeight: 700, color: selected ? "#1565c0" : "#e65100", textAlign: "center" }}>
+          {selected ? `"${selected.biz.name}" seleccionado — tocá un cuadrante para ubicarlo` : "Tocá una tarjeta para seleccionarla, luego tocá el cuadrante"}
+        </div>
+      )}
+
+      {/* Sin ubicar */}
+      <div
+        onClick={() => { if (selected && selected.fromCell && canInteract) {
+          const nm = JSON.parse(JSON.stringify(mat));
+          const [fr, fc] = selected.fromCell;
+          nm[fr][fc] = nm[fr][fc].filter(b => b.id !== selected.biz.id);
+          persist({ ...session, votes: { ...session.votes, [role]: nm } });
+          setSelected(null);
+        }}}
+        style={{ minHeight: 52, padding: 10, background: selected && selected.fromCell ? "#e3f2fd" : "#fafafa", borderRadius: 10, border: `2px dashed ${selected && selected.fromCell ? "#1976d2" : "#ddd"}`, marginBottom: 14, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", cursor: selected && selected.fromCell ? "pointer" : "default" }}>
         <span style={{ fontSize: 11, color: "#aaa", fontWeight: 700, marginRight: 4 }}>SIN UBICAR:</span>
         {unplaced.length === 0
           ? <span style={{ fontSize: 12, color: "#4caf50", fontWeight: 700 }}>✓ Todos ubicados</span>
           : unplaced.map(b => (
-            <div key={b.id} draggable={canDrag} onDragStart={e => { if (canDrag) { setDragging({ biz: b, fromCell: null }); e.dataTransfer.effectAllowed = "move"; } }}>
-              <BizCard business={b} color={color} />
+            <div key={b.id}
+              draggable={canInteract}
+              onDragStart={e => { if (canInteract) { selectBiz(b, null); e.dataTransfer.effectAllowed = "move"; } }}
+              onClick={e => { e.stopPropagation(); selectBiz(b, null); }}
+            >
+              <BizCard business={b} color={color} selected={selected?.biz.id === b.id} />
             </div>
           ))
         }
+        {selected && selected.fromCell && <span style={{ fontSize: 11, color: "#1976d2", fontWeight: 700 }}>← Tocá acá para devolver</span>}
       </div>
 
-      <MatrixBoard matrix={mat} onDrop={handleDrop} readOnly={!canDrag}
+      <MatrixBoard
+        matrix={mat}
+        onDrop={(e, r, c) => placeInCell(r, c)}
+        readOnly={!canInteract}
+        selected={selected}
         renderCell={(r, c, cell) => cell.map(b => (
-          <div key={b.id} draggable={canDrag} onDragStart={e => { if (canDrag) { setDragging({ biz: b, fromCell: [r, c] }); e.dataTransfer.effectAllowed = "move"; } }}>
-            <BizCard business={b} color={color} small />
+          <div key={b.id}
+            draggable={canInteract}
+            onDragStart={e => { if (canInteract) { selectBiz(b, [r, c]); e.dataTransfer.effectAllowed = "move"; } }}
+            onClick={e => {
+              e.stopPropagation();
+              if (!canInteract) return;
+              if (selected && selected.biz.id !== b.id) {
+                placeInCell(r, c);
+              } else {
+                selectBiz(b, [r, c]);
+              }
+            }}
+          >
+            <BizCard business={b} color={color} small selected={selected?.biz.id === b.id} />
           </div>
         ))}
       />
-      {canDrag && <p style={{ textAlign: "center", fontSize: 12, color: "#888", marginTop: 10 }}>Arrastrá cada tarjeta a la celda correspondiente en la matriz</p>}
     </div>
   );
 }
@@ -675,7 +725,7 @@ function RevealPanel({ session, colorMap }) {
 
 // ── PANEL: Discussion ─────────────────────────────────────────
 function DiscussionPanel({ session, persist, role, colorMap, isAdmin }) {
-  const [dragging, setDragging] = useState(null);
+  const [selected, setSelected] = useState(null);
   const [msg, setMsg] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const chatRef = useRef(null);
@@ -685,22 +735,30 @@ function DiscussionPanel({ session, persist, role, colorMap, isAdmin }) {
 
   useEffect(() => { if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight; }, [session.discussion]);
 
-  const handleDrop = (e, r, c) => {
-    e.preventDefault(); if (!dragging || !isAdmin) return;
+  const placeInCell = (r, c) => {
+    if (!selected || !isAdmin) return;
     const nm = consMat.map(row => row.map(cell => [...cell]));
-    if (dragging.fromCell) { const [fr, fc] = dragging.fromCell; nm[fr][fc] = nm[fr][fc].filter(b => b.id !== dragging.biz.id); }
-    nm[r][c].push(dragging.biz);
+    if (selected.fromCell) { const [fr, fc] = selected.fromCell; nm[fr][fc] = nm[fr][fc].filter(b => b.id !== selected.biz.id); }
+    nm[r][c].push(selected.biz);
     persist({ ...session, consensusMatrix: nm });
-    setDragging(null);
+    setSelected(null);
   };
 
+  const handleDrop = (e, r, c) => { placeInCell(r, c); };
+
   const handleDropUnplaced = e => {
-    e.preventDefault(); if (!dragging || !dragging.fromCell || !isAdmin) return;
+    if (!selected || !selected.fromCell || !isAdmin) return;
     const nm = consMat.map(row => row.map(cell => [...cell]));
-    const [fr, fc] = dragging.fromCell;
-    nm[fr][fc] = nm[fr][fc].filter(b => b.id !== dragging.biz.id);
+    const [fr, fc] = selected.fromCell;
+    nm[fr][fc] = nm[fr][fc].filter(b => b.id !== selected.biz.id);
     persist({ ...session, consensusMatrix: nm });
-    setDragging(null);
+    setSelected(null);
+  };
+
+  const selectBiz = (biz, fromCell = null) => {
+    if (!isAdmin) return;
+    if (selected && selected.biz.id === biz.id) { setSelected(null); return; }
+    setSelected({ biz, fromCell });
   };
 
   const sendMsg = () => {
@@ -754,22 +812,41 @@ function DiscussionPanel({ session, persist, role, colorMap, isAdmin }) {
         <div style={{ marginBottom: 10, padding: "8px 14px", background: isAdmin ? "#fff3e0" : "#e8f5e9", borderRadius: 8, fontSize: 13, fontWeight: 700, color: isAdmin ? "#e65100" : "#2e7d32" }}>
           {isAdmin ? "💬 Definí la posición consensuada (solo admin puede mover)" : "💬 Seguí la discusión en el chat"}
         </div>
-        <div onDragOver={e => e.preventDefault()} onDrop={isAdmin ? handleDropUnplaced : undefined}
-          style={{ minHeight: 48, padding: 8, background: "#fafafa", border: "2px dashed #ddd", borderRadius: 10, marginBottom: 12, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+        {isAdmin && selected && (
+          <div style={{ marginBottom: 8, padding: "6px 12px", background: "#e3f2fd", borderRadius: 8, fontSize: 13, fontWeight: 700, color: "#1565c0", textAlign: "center" }}>
+            "{selected.biz.name}" seleccionado — tocá el cuadrante destino
+          </div>
+        )}
+        <div
+          onClick={() => { if (selected && selected.fromCell) handleDropUnplaced(); }}
+          style={{ minHeight: 48, padding: 8, background: selected && selected.fromCell ? "#e3f2fd" : "#fafafa", border: `2px dashed ${selected && selected.fromCell ? "#1976d2" : "#ddd"}`, borderRadius: 10, marginBottom: 12, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", cursor: selected && selected.fromCell ? "pointer" : "default" }}>
           <span style={{ fontSize: 11, color: "#aaa", fontWeight: 700 }}>SIN UBICAR:</span>
           {unplaced.length === 0
             ? <span style={{ fontSize: 12, color: "#4caf50", fontWeight: 700 }}>✓ Todos ubicados</span>
             : unplaced.map(b => (
-              <div key={b.id} draggable={isAdmin} onDragStart={e => { if (isAdmin) { setDragging({ biz: b, fromCell: null }); e.dataTransfer.effectAllowed = "move"; } }}>
-                <BizCard business={b} color="#546e7a" />
+              <div key={b.id}
+                draggable={isAdmin}
+                onDragStart={e => { if (isAdmin) { selectBiz(b, null); e.dataTransfer.effectAllowed = "move"; } }}
+                onClick={e => { e.stopPropagation(); selectBiz(b, null); }}
+              >
+                <BizCard business={b} color="#546e7a" selected={selected?.biz.id === b.id} />
               </div>
             ))
           }
         </div>
-        <MatrixBoard matrix={consMat} onDrop={isAdmin ? handleDrop : () => {}} readOnly={!isAdmin}
+        <MatrixBoard matrix={consMat} onDrop={isAdmin ? handleDrop : () => {}} readOnly={!isAdmin} selected={isAdmin ? selected : null}
           renderCell={(r, c, cell) => cell.map((b, i) => (
-            <div key={i} draggable={isAdmin} onDragStart={e => { if (isAdmin) { setDragging({ biz: b, fromCell: [r, c] }); e.dataTransfer.effectAllowed = "move"; } }}>
-              <BizCard business={b} color="#37474f" small />
+            <div key={i}
+              draggable={isAdmin}
+              onDragStart={e => { if (isAdmin) { selectBiz(b, [r, c]); e.dataTransfer.effectAllowed = "move"; } }}
+              onClick={e => {
+                e.stopPropagation();
+                if (!isAdmin) return;
+                if (selected && selected.biz.id !== b.id) { placeInCell(r, c); }
+                else { selectBiz(b, [r, c]); }
+              }}
+            >
+              <BizCard business={b} color="#37474f" small selected={selected?.biz.id === b.id} />
             </div>
           ))}
         />
