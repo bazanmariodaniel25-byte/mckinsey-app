@@ -859,6 +859,230 @@ function ResultsPanel({ session, colorMap }) {
   );
 }
 
+// ── PANTALLA: Login / Selección empresa ───────────────────────
+function LoginScreen({ onLogin }) {
+  const [mode, setMode] = useState("select");
+  const [companyName, setCompanyName] = useState("");
+  const [companyId, setCompanyId] = useState("");
+  const [participantName, setParticipantName] = useState("");
+  const [adminPass, setAdminPass] = useState("");
+  const [err, setErr] = useState("");
+  const [companies, setCompanies] = useState([]);
+
+  useEffect(() => {
+    const saved = localStore.get("mckinsey_companies") || [];
+    setCompanies(saved);
+    fetch(`${SUPABASE_URL}/rest/v1/mckinsey_companies?select=id,name,created_at&order=created_at.desc&limit=50`, {
+      headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${SUPABASE_ANON_KEY}` }
+    })
+      .then(r => r.json())
+      .then(rows => {
+        if (Array.isArray(rows) && rows.length > 0) {
+          setCompanies(rows);
+          localStore.set("mckinsey_companies", rows);
+        }
+      }).catch(() => {});
+  }, []);
+
+  const createCompany = async () => {
+    const name = companyName.trim();
+    if (!name) { setErr("Ingresá un nombre para la empresa"); return; }
+    if (adminPass !== ADMIN_PASSWORD) { setErr("Contraseña de admin incorrecta"); return; }
+    const id = uid() + uid();
+    const company = { id, name, created_at: new Date().toISOString() };
+    try { await db.upsert("mckinsey_companies", company); } catch {}
+    const updated = [company, ...companies];
+    setCompanies(updated);
+    localStore.set("mckinsey_companies", updated);
+    onLogin({ companyId: id, companyName: name, role: "admin" });
+  };
+
+  const joinAsAdmin = (cid, cname) => {
+    if (adminPass !== ADMIN_PASSWORD) { setErr("Contraseña de admin incorrecta"); return; }
+    onLogin({ companyId: cid, companyName: cname, role: "admin" });
+  };
+
+  const joinAsParticipant = (cid, cname) => {
+    const name = participantName.trim();
+    if (!name) { setErr("Ingresá tu nombre"); return; }
+    onLogin({ companyId: cid, companyName: cname, role: "participant", name });
+  };
+
+  const selectedCompany = companies.find(c => c.id === companyId);
+
+  return (
+    <div style={{ minHeight:"100vh", background:"linear-gradient(135deg,#0d1b4b 0%,#1a3a8f 50%,#0d3b6e 100%)", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Georgia','Times New Roman',serif" }}>
+      <div style={{ width:"100%", maxWidth:480, padding:"0 16px" }}>
+        <div style={{ textAlign:"center", marginBottom:32 }}>
+          <div style={{ display:"inline-flex", alignItems:"center", justifyContent:"center", width:64, height:64, borderRadius:16, background:"rgba(255,255,255,.15)", marginBottom:16, fontSize:32, border:"1px solid rgba(255,255,255,.25)" }}>⬡</div>
+          <h1 style={{ color:"#fff", fontSize:28, fontWeight:400, margin:"0 0 6px", letterSpacing:-0.5 }}>Matriz McKinsey</h1>
+          <p style={{ color:"rgba(255,255,255,.6)", fontSize:14, margin:0 }}>Plataforma colaborativa de estrategia empresarial</p>
+        </div>
+        <div style={{ background:"rgba(255,255,255,.97)", borderRadius:18, padding:32, boxShadow:"0 20px 60px rgba(0,0,0,.35)" }}>
+
+          {mode === "select" && (
+            <>
+              <h2 style={{ margin:"0 0 20px", fontSize:18, fontWeight:600, color:"#1a237e" }}>Seleccioná tu empresa</h2>
+              {companies.length === 0
+                ? <p style={{ color:"#888", fontSize:14, textAlign:"center", padding:"16px 0" }}>No hay empresas registradas aún.</p>
+                : <div style={{ maxHeight:200, overflowY:"auto", marginBottom:16 }}>
+                    {companies.map(c => (
+                      <div key={c.id} onClick={() => { setCompanyId(c.id); setMode("join"); setErr(""); }}
+                        style={{ padding:"10px 14px", borderRadius:10, background:"#f5f7ff", border:"1px solid #dde4ff", marginBottom:8, cursor:"pointer", display:"flex", alignItems:"center", gap:10 }}
+                        onMouseEnter={e=>e.currentTarget.style.background="#e8edff"}
+                        onMouseLeave={e=>e.currentTarget.style.background="#f5f7ff"}>
+                        <span style={{ fontSize:18 }}>🏢</span>
+                        <span style={{ fontWeight:600, fontSize:14, color:"#1a237e", flex:1 }}>{c.name}</span>
+                        <span style={{ fontSize:11, color:"#888" }}>{new Date(c.created_at).toLocaleDateString("es-AR")}</span>
+                      </div>
+                    ))}
+                  </div>
+              }
+              <button onClick={() => { setMode("create"); setErr(""); }}
+                style={{ width:"100%", padding:"11px", background:"#1a237e", color:"#fff", border:"none", borderRadius:10, fontWeight:700, fontSize:14, cursor:"pointer" }}>
+                + Nueva empresa
+              </button>
+              {err && <p style={{ color:"#e53935", fontSize:12, marginTop:10, textAlign:"center" }}>{err}</p>}
+            </>
+          )}
+
+          {mode === "create" && (
+            <>
+              <button onClick={() => setMode("select")} style={{ background:"none", border:"none", color:"#1a237e", cursor:"pointer", fontSize:13, padding:0, marginBottom:16 }}>← Volver</button>
+              <h2 style={{ margin:"0 0 20px", fontSize:18, fontWeight:600, color:"#1a237e" }}>Crear nueva empresa</h2>
+              <div style={{ marginBottom:14 }}>
+                <label style={{ fontSize:12, fontWeight:700, color:"#444", display:"block", marginBottom:4 }}>NOMBRE DE LA EMPRESA</label>
+                <input value={companyName} onChange={e=>setCompanyName(e.target.value)}
+                  placeholder="Ej: Grupo Alfa SA"
+                  style={{ width:"100%", padding:"9px 12px", borderRadius:8, border:"1px solid #ddd", fontSize:14, boxSizing:"border-box" }}/>
+              </div>
+              <div style={{ marginBottom:18 }}>
+                <label style={{ fontSize:12, fontWeight:700, color:"#444", display:"block", marginBottom:4 }}>CONTRASEÑA DE ADMINISTRADOR</label>
+                <input type="password" value={adminPass} onChange={e=>setAdminPass(e.target.value)}
+                  placeholder="Contraseña admin"
+                  style={{ width:"100%", padding:"9px 12px", borderRadius:8, border:"1px solid #ddd", fontSize:14, boxSizing:"border-box" }}/>
+              </div>
+              <button onClick={createCompany}
+                style={{ width:"100%", padding:"11px", background:"#2e7d32", color:"#fff", border:"none", borderRadius:10, fontWeight:700, fontSize:14, cursor:"pointer" }}>
+                Crear empresa y continuar como Admin
+              </button>
+              {err && <p style={{ color:"#e53935", fontSize:12, marginTop:10, textAlign:"center" }}>{err}</p>}
+            </>
+          )}
+
+          {mode === "join" && (
+            <>
+              <button onClick={() => { setMode("select"); setErr(""); }} style={{ background:"none", border:"none", color:"#1a237e", cursor:"pointer", fontSize:13, padding:0, marginBottom:16 }}>← Volver</button>
+              <h2 style={{ margin:"0 0 6px", fontSize:18, fontWeight:600, color:"#1a237e" }}>{selectedCompany?.name || "Empresa"}</h2>
+              <p style={{ margin:"0 0 20px", fontSize:13, color:"#666" }}>Elegí cómo querés ingresar</p>
+              <div style={{ background:"#f5f7ff", borderRadius:12, padding:16, marginBottom:14 }}>
+                <div style={{ fontWeight:700, fontSize:12, color:"#1a237e", marginBottom:10 }}>👤 INGRESAR COMO PARTICIPANTE</div>
+                <input value={participantName} onChange={e=>setParticipantName(e.target.value)}
+                  onKeyDown={e=>e.key==="Enter"&&joinAsParticipant(companyId, selectedCompany?.name)}
+                  placeholder="Tu nombre completo"
+                  style={{ width:"100%", padding:"8px 10px", borderRadius:8, border:"1px solid #dde", fontSize:13, marginBottom:8, boxSizing:"border-box" }}/>
+                <button onClick={()=>joinAsParticipant(companyId, selectedCompany?.name)}
+                  style={{ width:"100%", padding:"9px", background:"#1976d2", color:"#fff", border:"none", borderRadius:8, fontWeight:700, fontSize:13, cursor:"pointer" }}>
+                  Ingresar
+                </button>
+              </div>
+              <div style={{ background:"#fdf0ff", borderRadius:12, padding:16 }}>
+                <div style={{ fontWeight:700, fontSize:12, color:"#6a1b9a", marginBottom:10 }}>🔐 INGRESAR COMO ADMINISTRADOR</div>
+                <input type="password" value={adminPass} onChange={e=>setAdminPass(e.target.value)}
+                  onKeyDown={e=>e.key==="Enter"&&joinAsAdmin(companyId, selectedCompany?.name)}
+                  placeholder="Contraseña admin"
+                  style={{ width:"100%", padding:"8px 10px", borderRadius:8, border:"1px solid #e8d0f5", fontSize:13, marginBottom:8, boxSizing:"border-box" }}/>
+                <button onClick={()=>joinAsAdmin(companyId, selectedCompany?.name)}
+                  style={{ width:"100%", padding:"9px", background:"#6a1b9a", color:"#fff", border:"none", borderRadius:8, fontWeight:700, fontSize:13, cursor:"pointer" }}>
+                  Ingresar como Admin
+                </button>
+              </div>
+              {err && <p style={{ color:"#e53935", fontSize:12, marginTop:10, textAlign:"center" }}>{err}</p>}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── PANEL: Setup ─────────────────────────────────────────────
+function SetupPanel({ session, persist, colorMap }) {
+  const [bizInput, setBizInput] = useState("");
+  const [partInput, setPartInput] = useState("");
+  const pids = Object.keys(session.participants);
+
+  const addBiz = () => {
+    const v = bizInput.trim(); if (!v) return;
+    persist({ ...session, businesses: [...session.businesses, { id: uid(), name: v }] });
+    setBizInput("");
+  };
+  const addPart = () => {
+    const v = partInput.trim(); if (!v) return;
+    const pid = uid();
+    persist({ ...session, participants: { ...session.participants, [pid]: { label: v, name: "" } } });
+    setPartInput("");
+  };
+  const startVoting = () => {
+    const iv = {};
+    Object.keys(session.participants).forEach(pid => { iv[pid] = emptyMatrix(); });
+    persist({ ...session, phase: PHASES.VOTING, votingOpen: true, votes: iv });
+  };
+
+  return (
+    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20 }}>
+      <div style={{ background:"var(--color-background-primary)", borderRadius:12, padding:20, boxShadow:"0 2px 8px rgba(0,0,0,.07)" }}>
+        <h3 style={{ margin:"0 0 14px", color:"#1a237e", fontSize:16 }}>📦 Negocios / Unidades</h3>
+        <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+          <input value={bizInput} onChange={e=>setBizInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addBiz()}
+            placeholder="Nombre del negocio..."
+            style={{ flex:1, padding:"8px 10px", borderRadius:8, border:"1px solid #ddd", fontSize:13 }}/>
+          <button onClick={addBiz} style={{ padding:"8px 14px", background:"#1976d2", color:"#fff", border:"none", borderRadius:8, fontWeight:700, cursor:"pointer" }}>+</button>
+        </div>
+        <div style={{ maxHeight:280, overflowY:"auto" }}>
+          {session.businesses.map(b => (
+            <div key={b.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 10px", background:"#f5f5f5", borderRadius:8, marginBottom:6 }}>
+              <span style={{ flex:1, fontSize:13, fontWeight:600 }}>{b.name}</span>
+              <button onClick={()=>persist({ ...session, businesses:session.businesses.filter(x=>x.id!==b.id) })}
+                style={{ background:"none", border:"none", color:"#e53935", cursor:"pointer", fontWeight:700, fontSize:16 }}>×</button>
+            </div>
+          ))}
+          {session.businesses.length===0 && <p style={{ color:"#aaa", textAlign:"center", fontSize:13 }}>Sin negocios</p>}
+        </div>
+      </div>
+      <div style={{ background:"var(--color-background-primary)", borderRadius:12, padding:20, boxShadow:"0 2px 8px rgba(0,0,0,.07)" }}>
+        <h3 style={{ margin:"0 0 14px", color:"#1a237e", fontSize:16 }}>👥 Participantes</h3>
+        <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+          <input value={partInput} onChange={e=>setPartInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addPart()}
+            placeholder="Nombre del participante..."
+            style={{ flex:1, padding:"8px 10px", borderRadius:8, border:"1px solid #ddd", fontSize:13 }}/>
+          <button onClick={addPart} style={{ padding:"8px 14px", background:"#1976d2", color:"#fff", border:"none", borderRadius:8, fontWeight:700, cursor:"pointer" }}>+</button>
+        </div>
+        <div style={{ maxHeight:280, overflowY:"auto" }}>
+          {pids.map(pid => {
+            const p = session.participants[pid];
+            return (
+              <div key={pid} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 10px", background:"#f5f5f5", borderRadius:8, marginBottom:6 }}>
+                <div style={{ width:10, height:10, borderRadius:"50%", background:colorMap[pid], flexShrink:0 }}/>
+                <span style={{ flex:1, fontSize:13, fontWeight:600 }}>{p.label}</span>
+                <button onClick={()=>{ const ps={...session.participants}; delete ps[pid]; persist({...session,participants:ps}); }}
+                  style={{ background:"none", border:"none", color:"#e53935", cursor:"pointer", fontWeight:700, fontSize:16 }}>×</button>
+              </div>
+            );
+          })}
+          {pids.length===0 && <p style={{ color:"#aaa", textAlign:"center", fontSize:13 }}>Sin participantes</p>}
+        </div>
+      </div>
+      <div style={{ gridColumn:"1/-1", textAlign:"center" }}>
+        <button onClick={startVoting} disabled={session.businesses.length===0||pids.length===0}
+          style={{ padding:"13px 36px", fontSize:16, fontWeight:700, background:session.businesses.length>0&&pids.length>0?"#2e7d32":"#ccc", color:"#fff", border:"none", borderRadius:12, cursor:session.businesses.length>0&&pids.length>0?"pointer":"not-allowed" }}>
+          ▶ Iniciar Votación
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── POPOVER: Códigos ──────────────────────────────────────────
 function CodesPopover({ participants, colorMap }) {
   const [open, setOpen] = useState(false);
