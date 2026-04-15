@@ -690,6 +690,200 @@ function BarraDesvio({ pct, color }) {
   );
 }
 
+// ── GENERADOR DE PDF ─────────────────────────────────────────
+function generarPDF(session, colorMap, desvioIndividual, desvioGrupo, desvioConsensoDetalle, desvioConsensoPct, avgMatrix, avgExacto) {
+  const pids = Object.keys(session.participants);
+  const rowL = ["Alto","Medio","Bajo"], colL = ["Débil","Media","Fuerte"];
+
+  const cellColor = (r,c) => {
+    if(r===0&&c===2) return "#c8e6c9";
+    if((r===0&&c===1)||(r===1&&c===2)) return "#fff9c4";
+    if(r===2&&c===0) return "#ffcdd2";
+    if(r===1&&c===1) return "#ffe0b2";
+    return "#f0f0f0";
+  };
+
+  const matrizHTML = (mat, titulo, color) => {
+    const filas = mat.map((row,r) => {
+      const celdas = row.map((cell,c) => {
+        const nombres = cell.map(b=>b.name).join(", ") || "";
+        return `<td style="background:${cellColor(r,c)};border:1px solid #ccc;padding:6px 4px;font-size:10px;vertical-align:top;min-width:60px">${nombres}</td>`;
+      }).join("");
+      return `<tr><td style="background:#f0ece8;border:1px solid #ccc;padding:4px 6px;font-size:10px;font-weight:700;white-space:nowrap">${rowL[r]}</td>${celdas}</tr>`;
+    }).join("");
+    return `
+      <div style="margin-bottom:16px">
+        <div style="font-weight:700;font-size:13px;color:${color};margin-bottom:6px;text-align:center">${titulo}</div>
+        <table style="border-collapse:collapse;width:100%">
+          <thead><tr>
+            <th style="background:#f0ece8;border:1px solid #ccc;padding:4px;font-size:10px;width:50px"></th>
+            ${colL.map(l=>`<th style="background:#d4eaf5;border:1px solid #ccc;padding:4px;font-size:10px">${l}</th>`).join("")}
+          </tr></thead>
+          <tbody>${filas}</tbody>
+        </table>
+      </div>`;
+  };
+
+  const barraHTML = (pct, color) => {
+    const w = pct ?? 0;
+    return `<div style="background:#eee;border-radius:4px;height:6px;margin:4px 0"><div style="width:${w}%;background:${color};height:6px;border-radius:4px"></div></div>`;
+  };
+
+  const colorD = pct => pct===null?"#aaa":pct<=20?"#2e7d32":pct<=45?"#f57c00":"#c62828";
+  const labelD = pct => pct===null?"Sin datos":pct<=20?"Muy alineado":pct<=45?"Desvío moderado":"Desvío alto";
+
+  // Votos individuales
+  const seccionesIndividuales = pids.map(pid => {
+    const p = session.participants[pid];
+    const mat = session.votes[pid] || emptyMatrix();
+    const color = colorMap[pid];
+    const pct = desvioIndividual[pid];
+    const cd = colorD(pct);
+
+    const negocioRows = session.businesses.map(b => {
+      let pos = null;
+      mat.forEach((row,r)=>row.forEach((cell,c)=>{ if(cell.find(x=>x.id===b.id)) pos={r,c}; }));
+      return `<tr>
+        <td style="padding:4px 8px;border-bottom:1px solid #eee;font-size:11px">${b.name}</td>
+        <td style="padding:4px 8px;border-bottom:1px solid #eee;font-size:11px;text-align:center">${pos?`${rowL[pos.r]} / ${colL[pos.c]}`:"—"}</td>
+      </tr>`;
+    }).join("");
+
+    return `
+      <div style="page-break-inside:avoid;margin-bottom:24px;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden">
+        <div style="background:${color};color:#fff;padding:10px 16px;font-weight:700;font-size:13px">
+          ${p.name||p.label}
+          ${pct!==null?`<span style="float:right;font-size:12px">${labelD(pct)} — ${pct}% desvío</span>`:""}
+        </div>
+        <div style="padding:14px;display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap">
+          <div style="flex:1;min-width:200px">
+            ${matrizHTML(mat,"Posición votada",color)}
+          </div>
+          <div style="min-width:180px">
+            <div style="font-size:11px;font-weight:700;color:#555;margin-bottom:8px">NEGOCIOS UBICADOS</div>
+            <table style="width:100%;border-collapse:collapse">
+              <thead><tr>
+                <th style="text-align:left;padding:4px 8px;font-size:11px;color:#888;border-bottom:1px solid #eee">Negocio</th>
+                <th style="text-align:center;padding:4px 8px;font-size:11px;color:#888;border-bottom:1px solid #eee">Posición</th>
+              </tr></thead>
+              <tbody>${negocioRows}</tbody>
+            </table>
+            ${pct!==null?`
+            <div style="margin-top:12px;padding:10px;background:#f9f9f9;border-radius:6px">
+              <div style="font-size:11px;font-weight:700;color:#555;margin-bottom:4px">DESVÍO vs PROMEDIO</div>
+              <div style="font-size:20px;font-weight:900;color:${cd}">${pct}%</div>
+              <div style="font-size:11px;color:${cd};font-weight:700">${labelD(pct)}</div>
+              ${barraHTML(pct,cd)}
+            </div>`:""}
+          </div>
+        </div>
+      </div>`;
+  }).join("");
+
+  // Sección consolidación
+  const consRows = session.businesses.map(b => {
+    const det = desvioConsensoDetalle[b.id];
+    const avg = avgExacto[b.id];
+    const avgRound = avg?{r:Math.round(avg.r),c:Math.round(avg.c)}:null;
+    const cd = det?colorD(det.pct):"#aaa";
+    return `<tr>
+      <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;font-weight:600">${b.name}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;color:#2e7d32">${det?`${rowL[det.cons.r]} / ${colL[det.cons.c]}`:"Sin ubicar"}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;color:#1565c0">${avgRound?`${rowL[avgRound.r]} / ${colL[avgRound.c]}`:"—"}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;color:${cd};font-weight:700">${det?`${det.pct}%`:"—"}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;color:${cd}">${det?labelD(det.pct):"—"}</td>
+    </tr>`;
+  }).join("");
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Matriz McKinsey — Informe</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 24px; color: #333; font-size: 12px; }
+    @media print {
+      body { padding: 0; }
+      .no-print { display: none !important; }
+      @page { margin: 15mm; size: A4; }
+    }
+    h1 { color: #1a237e; font-size: 20px; margin: 0 0 4px; }
+    h2 { color: #1a237e; font-size: 15px; margin: 20px 0 10px; border-bottom: 2px solid #1a237e; padding-bottom: 4px; }
+    .header { background: linear-gradient(90deg,#1a237e,#283593); color: #fff; padding: 20px 24px; margin: -24px -24px 24px; }
+    .header h1 { color: #fff; font-size: 22px; }
+    .header p { color: rgba(255,255,255,.8); margin: 4px 0 0; font-size: 13px; }
+    .indicador-global { display: inline-block; padding: 10px 20px; border-radius: 8px; margin: 0 8px 8px 0; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Matriz McKinsey — Informe de Resultados</h1>
+    <p>Generado el ${new Date().toLocaleDateString("es-AR")} a las ${new Date().toLocaleTimeString("es-AR")}</p>
+    <p>${pids.length} participantes · ${session.businesses.length} negocios</p>
+  </div>
+
+  <button class="no-print" onclick="window.print()" style="background:#1a237e;color:#fff;border:none;padding:10px 24px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:20px">
+    🖨️ Imprimir / Guardar PDF
+  </button>
+
+  <!-- INDICADORES GLOBALES -->
+  <h2>Indicadores Globales</h2>
+  <div>
+    ${desvioGrupo!==null?`<div class="indicador-global" style="background:${colorD(desvioGrupo)}18;border:1px solid ${colorD(desvioGrupo)}40">
+      <div style="font-size:28px;font-weight:900;color:${colorD(desvioGrupo)}">${desvioGrupo}%</div>
+      <div style="font-size:11px;font-weight:700;color:#555">Desvío promedio del grupo</div>
+      <div style="font-size:11px;color:${colorD(desvioGrupo)}">${labelD(desvioGrupo)}</div>
+    </div>`:""}
+    ${desvioConsensoPct!==null?`<div class="indicador-global" style="background:${colorD(desvioConsensoPct)}18;border:1px solid ${colorD(desvioConsensoPct)}40">
+      <div style="font-size:28px;font-weight:900;color:${colorD(desvioConsensoPct)}">${desvioConsensoPct}%</div>
+      <div style="font-size:11px;font-weight:700;color:#555">Desvío consenso vs promedio</div>
+      <div style="font-size:11px;color:${colorD(desvioConsensoPct)}">${labelD(desvioConsensoPct)}</div>
+    </div>`:""}
+  </div>
+
+  <!-- VOTOS INDIVIDUALES -->
+  <h2>Votos por Participante</h2>
+  ${seccionesIndividuales}
+
+  <!-- CONSOLIDACIÓN -->
+  <h2>Consolidación Final</h2>
+  <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:20px">
+    <div style="flex:1;min-width:220px">${matrizHTML(session.consensusMatrix,"✅ Matriz Consensuada","#2e7d32")}</div>
+    <div style="flex:1;min-width:220px">${matrizHTML(avgMatrix,"📊 Matriz Promedio","#1565c0")}</div>
+  </div>
+
+  <table style="width:100%;border-collapse:collapse;margin-bottom:24px">
+    <thead>
+      <tr style="background:#1a237e;color:#fff">
+        <th style="padding:8px;text-align:left;font-size:12px">Negocio</th>
+        <th style="padding:8px;text-align:center;font-size:12px">Consenso</th>
+        <th style="padding:8px;text-align:center;font-size:12px">Promedio votos</th>
+        <th style="padding:8px;text-align:center;font-size:12px">Desvío</th>
+        <th style="padding:8px;text-align:center;font-size:12px">Diagnóstico</th>
+      </tr>
+    </thead>
+    <tbody>${consRows}</tbody>
+  </table>
+
+  <!-- DISCUSIÓN -->
+  ${session.discussion.length>0?`
+  <h2>Registro de Discusión</h2>
+  <div style="border:1px solid #e0e0e0;border-radius:8px;overflow:hidden">
+    ${session.discussion.map(d=>`
+    <div style="padding:8px 12px;border-bottom:1px solid #eee;border-left:3px solid ${d.color}">
+      <span style="font-weight:700;font-size:11px;color:${d.color}">${d.name}</span>
+      <span style="font-size:10px;color:#aaa;margin-left:8px">${d.time}</span>
+      <div style="font-size:12px;margin-top:2px">${d.text}</div>
+    </div>`).join("")}
+  </div>`:""}
+</body>
+</html>`;
+
+  const w = window.open("","_blank");
+  w.document.write(html);
+  w.document.close();
+}
+
 // ── PANEL: Results ────────────────────────────────────────────
 function ResultsPanel({ session, colorMap }) {
   const pids = Object.keys(session.participants);
@@ -866,7 +1060,7 @@ function ResultsPanel({ session, colorMap }) {
         </div>
       </div>
 
-      {/* ── COMPARACIÓN POR NEGOCIO (existente) ── */}
+      {/* ── COMPARACIÓN POR NEGOCIO ── */}
       <div style={{ background: "#fff", borderRadius: 14, padding: 22, boxShadow: "0 2px 8px rgba(0,0,0,.07)" }}>
         <h3 style={{ margin: "0 0 14px", color: "#333", fontSize: 15 }}>🔍 Comparación por negocio</h3>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
@@ -888,6 +1082,18 @@ function ResultsPanel({ session, colorMap }) {
             );
           })}
         </div>
+      </div>
+
+      {/* ── BOTÓN EXPORTAR PDF ── */}
+      <div style={{ textAlign: "center", padding: "8px 0 16px" }}>
+        <button
+          onClick={() => generarPDF(session, colorMap, desvioIndividual, desvioGrupo, desvioConsensoDetalle, desvioConsensoPct, avgMatrix, avgExacto)}
+          style={{ padding: "14px 36px", background: "#1a237e", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, fontSize: 16, cursor: "pointer", boxShadow: "0 4px 12px rgba(26,35,126,.3)" }}>
+          📄 Exportar informe PDF
+        </button>
+        <p style={{ fontSize: 12, color: "#aaa", marginTop: 8 }}>
+          Se abre una nueva pestaña — usá Ctrl+P o el botón para guardar como PDF
+        </p>
       </div>
 
     </div>
