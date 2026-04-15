@@ -218,10 +218,12 @@ function MatrixBoard({ matrix, onDrop, renderCell, readOnly }) {
   const rowLabels = ["Alto", "Medio", "Bajo"];
   const colLabels = ["Débil", "Media", "Fuerte"];
   const cellBg = (r, c) => {
-    if (r === 0 && c === 2) return "#c8e6c9";
-    if ((r === 0 && c === 1) || (r === 1 && c === 2)) return "#fff9c4";
-    if (r === 2 && c === 0) return "#ffcdd2";
-    if (r === 1 && c === 1) return "#ffe0b2";
+    // VERDE: Alto/Fuerte, Alto/Media, Medio/Fuerte
+    if ((r===0&&c===2)||(r===0&&c===1)||(r===1&&c===2)) return "#c8e6c9";
+    // AMARILLO: Alto/Débil, Medio/Media, Bajo/Fuerte
+    if ((r===0&&c===0)||(r===1&&c===1)||(r===2&&c===2)) return "#fff9c4";
+    // ROJO: Medio/Débil, Bajo/Débil, Bajo/Media
+    if ((r===1&&c===0)||(r===2&&c===0)||(r===2&&c===1)) return "#ffcdd2";
     return "#f7f7f7";
   };
 
@@ -696,10 +698,12 @@ function generarPDF(session, colorMap, desvioIndividual, desvioGrupo, desvioCons
   const rowL = ["Alto","Medio","Bajo"], colL = ["Débil","Media","Fuerte"];
 
   const cellColor = (r,c) => {
-    if(r===0&&c===2) return "#c8e6c9";
-    if((r===0&&c===1)||(r===1&&c===2)) return "#fff9c4";
-    if(r===2&&c===0) return "#ffcdd2";
-    if(r===1&&c===1) return "#ffe0b2";
+    // VERDE: Alto/Fuerte, Alto/Media, Medio/Fuerte
+    if((r===0&&c===2)||(r===0&&c===1)||(r===1&&c===2)) return "#c8e6c9";
+    // AMARILLO: Alto/Débil, Medio/Media, Bajo/Fuerte
+    if((r===0&&c===0)||(r===1&&c===1)||(r===2&&c===2)) return "#fff9c4";
+    // ROJO: Medio/Débil, Bajo/Débil, Bajo/Media
+    if((r===1&&c===0)||(r===2&&c===0)||(r===2&&c===1)) return "#ffcdd2";
     return "#f0f0f0";
   };
 
