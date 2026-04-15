@@ -594,106 +594,160 @@ function SetupPanel({ session, persist, colorMap }) {
 
 // ── PANEL: Votación ───────────────────────────────────────────
 function VotingPanel({ session, persist, role, colorMap, readOnly }) {
-  const [selected, setSelected] = useState(null); // { biz, fromCell }
+  const [selected, setSelected] = useState(null); // biz seleccionado
   const mat = session.votes[role] ? JSON.parse(JSON.stringify(session.votes[role])) : emptyMatrix();
   const placed = mat.flat(2).map(b => b.id);
   const unplaced = session.businesses.filter(b => !placed.includes(b.id));
   const color = colorMap[role];
   const canInteract = !readOnly && session.votingOpen;
 
-  // Colocar en cuadrante (funciona para drag y tap)
-  const placeInCell = (r, c) => {
-    if (!selected || !canInteract) return;
-    const nm = JSON.parse(JSON.stringify(mat));
-    if (selected.fromCell) {
-      const [fr, fc] = selected.fromCell;
-      nm[fr][fc] = nm[fr][fc].filter(b => b.id !== selected.biz.id);
+  const rowLabels = ["Alto","Medio","Bajo"];
+  const colLabels = ["Débil","Media","Fuerte"];
+
+  const cellBg = (r, c) => {
+    if (r===0&&c===2) return "#c8e6c9";
+    if ((r===0&&c===1)||(r===1&&c===2)) return "#fff9c4";
+    if (r===2&&c===0) return "#ffcdd2";
+    if (r===1&&c===1) return "#ffe0b2";
+    return "#f0f0f0";
+  };
+
+  // Obtener posición actual del negocio en la matriz
+  const getBizCell = (biz) => {
+    for (let r=0;r<3;r++) for (let c=0;c<3;c++) {
+      if (mat[r][c].find(b=>b.id===biz.id)) return {r,c};
     }
-    nm[r][c].push(selected.biz);
+    return null;
+  };
+
+  // Mover negocio a cuadrante
+  const moveTo = (biz, r, c) => {
+    const nm = JSON.parse(JSON.stringify(mat));
+    // Quitar de donde esté
+    for (let rr=0;rr<3;rr++) for (let cc=0;cc<3;cc++) {
+      nm[rr][cc] = nm[rr][cc].filter(b=>b.id!==biz.id);
+    }
+    nm[r][c].push(biz);
     persist({ ...session, votes: { ...session.votes, [role]: nm } });
     setSelected(null);
   };
 
-  // Quitar de cuadrante y volver a sin ubicar
-  const removeFromCell = (biz, r, c) => {
-    if (!canInteract) return;
-    if (selected && selected.biz.id === biz.id) { setSelected(null); return; }
+  // Quitar de la matriz (volver a sin ubicar)
+  const removeFromMatrix = (biz) => {
     const nm = JSON.parse(JSON.stringify(mat));
-    nm[r][c] = nm[r][c].filter(b => b.id !== biz.id);
+    for (let rr=0;rr<3;rr++) for (let cc=0;cc<3;cc++) {
+      nm[rr][cc] = nm[rr][cc].filter(b=>b.id!==biz.id);
+    }
     persist({ ...session, votes: { ...session.votes, [role]: nm } });
-  };
-
-  const selectBiz = (biz, fromCell = null) => {
-    if (!canInteract) return;
-    if (selected && selected.biz.id === biz.id) { setSelected(null); return; }
-    setSelected({ biz, fromCell });
+    setSelected(null);
   };
 
   return (
     <div>
-      <div style={{ marginBottom: 14, padding: "10px 16px", background: "#e8f5e9", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <div style={{ width: 12, height: 12, borderRadius: "50%", background: color }} />
-        <span style={{ fontWeight: 700, fontSize: 14 }}>{session.participants[role]?.name || session.participants[role]?.label}</span>
-        <span style={{ marginLeft: "auto", fontSize: 12, color: "#666" }}>{placed.length}/{session.businesses.length} ubicados</span>
-        {!session.votingOpen && <span style={{ fontSize: 12, background: "#ffcdd2", color: "#c62828", padding: "2px 10px", borderRadius: 20, fontWeight: 700 }}>🔒 Cerrada</span>}
+      {/* Header */}
+      <div style={{ marginBottom:14, padding:"10px 16px", background:"#e8f5e9", borderRadius:10, display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+        <div style={{ width:12, height:12, borderRadius:"50%", background:color }} />
+        <span style={{ fontWeight:700, fontSize:14 }}>{session.participants[role]?.name || session.participants[role]?.label}</span>
+        <span style={{ marginLeft:"auto", fontSize:12, color:"#666" }}>{placed.length}/{session.businesses.length} ubicados</span>
+        {!session.votingOpen && <span style={{ fontSize:12, background:"#ffcdd2", color:"#c62828", padding:"2px 10px", borderRadius:20, fontWeight:700 }}>🔒 Cerrada</span>}
       </div>
 
-      {/* Instrucción contextual */}
-      {canInteract && (
-        <div style={{ marginBottom: 10, padding: "8px 14px", background: selected ? "#e3f2fd" : "#fff8e1", borderRadius: 8, fontSize: 13, fontWeight: 700, color: selected ? "#1565c0" : "#e65100", textAlign: "center" }}>
-          {selected ? `"${selected.biz.name}" seleccionado — tocá un cuadrante para ubicarlo` : "Tocá una tarjeta para seleccionarla, luego tocá el cuadrante"}
+      {canInteract ? (
+        /* ── MODO INTERACTIVO: lista de negocios + grilla de botones ── */
+        <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+
+          {/* Lista de negocios */}
+          <div style={{ background:"#fafafa", borderRadius:12, padding:14, border:"1px solid #eee" }}>
+            <div style={{ fontSize:12, fontWeight:700, color:"#888", marginBottom:10 }}>NEGOCIOS — tocá uno para ubicarlo</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {session.businesses.map(b => {
+                const cell = getBizCell(b);
+                const isSelected = selected?.id === b.id;
+                return (
+                  <button key={b.id}
+                    onClick={() => setSelected(isSelected ? null : b)}
+                    style={{
+                      display:"flex", alignItems:"center", gap:10,
+                      padding:"10px 14px", borderRadius:10, border:"none",
+                      background: isSelected ? color : cell ? "#e8f5e9" : "#fff",
+                      boxShadow: isSelected ? `0 0 0 3px ${color}` : "0 1px 4px rgba(0,0,0,.1)",
+                      cursor:"pointer", textAlign:"left", transition:"all .15s",
+                    }}>
+                    <span style={{ flex:1, fontWeight:700, fontSize:14, color: isSelected ? "#fff" : "#333" }}>{b.name}</span>
+                    {cell
+                      ? <span style={{ fontSize:11, background: isSelected?"rgba(255,255,255,.3)":"#c8e6c9", color: isSelected?"#fff":"#2e7d32", padding:"2px 8px", borderRadius:20, fontWeight:700 }}>
+                          {rowLabels[cell.r]} / {colLabels[cell.c]}
+                        </span>
+                      : <span style={{ fontSize:11, color: isSelected?"rgba(255,255,255,.7)":"#aaa" }}>Sin ubicar</span>
+                    }
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Grilla de cuadrantes — solo visible cuando hay algo seleccionado */}
+          {selected && (
+            <div style={{ background:"#e3f2fd", borderRadius:12, padding:14, border:"2px solid #1976d2" }}>
+              <div style={{ fontSize:13, fontWeight:700, color:"#1565c0", marginBottom:12, textAlign:"center" }}>
+                ¿Dónde va <span style={{ background:color, color:"#fff", padding:"1px 10px", borderRadius:20 }}>{selected.name}</span>?
+              </div>
+              {/* Col headers */}
+              <div style={{ display:"grid", gridTemplateColumns:"52px 1fr 1fr 1fr", gap:4, marginBottom:4 }}>
+                <div/>
+                {colLabels.map(l=><div key={l} style={{ textAlign:"center", fontSize:11, fontWeight:700, color:"#555", background:"#ddd", borderRadius:4, padding:"3px 0" }}>{l}</div>)}
+              </div>
+              {/* Rows */}
+              {rowLabels.map((rl,r)=>(
+                <div key={r} style={{ display:"grid", gridTemplateColumns:"52px 1fr 1fr 1fr", gap:4, marginBottom:4 }}>
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:700, color:"#555", background:"#ddd", borderRadius:4 }}>{rl}</div>
+                  {colLabels.map((_,c)=>(
+                    <button key={c} onClick={()=>moveTo(selected,r,c)}
+                      style={{ background:cellBg(r,c), border:"2px solid transparent", borderRadius:8, padding:"16px 4px", fontSize:11, fontWeight:700, color:"#444", cursor:"pointer", transition:"border .1s, transform .1s", lineHeight:1.2 }}
+                      onMouseEnter={e=>{e.currentTarget.style.border="2px solid #1976d2";e.currentTarget.style.transform="scale(1.05)";}}
+                      onMouseLeave={e=>{e.currentTarget.style.border="2px solid transparent";e.currentTarget.style.transform="scale(1)";}}>
+                      {rl}<br/>{colLabels[c]}
+                    </button>
+                  ))}
+                </div>
+              ))}
+              {/* Botón quitar */}
+              {getBizCell(selected) && (
+                <button onClick={()=>removeFromMatrix(selected)}
+                  style={{ marginTop:8, width:"100%", padding:"8px", background:"#fff", border:"1px solid #ddd", borderRadius:8, fontSize:12, fontWeight:700, color:"#e53935", cursor:"pointer" }}>
+                  × Quitar de la matriz
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Vista de la matriz (solo lectura, para referencia) */}
+          <div>
+            <div style={{ fontSize:12, fontWeight:700, color:"#888", marginBottom:8 }}>TU MATRIZ ACTUAL</div>
+            <MatrixBoard matrix={mat} onDrop={()=>{}} readOnly
+              renderCell={(r,c,cell)=>cell.map(b=>(
+                <div key={b.id}><BizCard business={b} color={color} small /></div>
+              ))}
+            />
+          </div>
+        </div>
+      ) : (
+        /* ── MODO SOLO LECTURA ── */
+        <div>
+          <div style={{ minHeight:52, padding:10, background:"#fafafa", borderRadius:10, border:"2px dashed #ddd", marginBottom:14, display:"flex", flexWrap:"wrap", gap:8, alignItems:"center" }}>
+            <span style={{ fontSize:11, color:"#aaa", fontWeight:700, marginRight:4 }}>SIN UBICAR:</span>
+            {unplaced.length===0
+              ? <span style={{ fontSize:12, color:"#4caf50", fontWeight:700 }}>✓ Todos ubicados</span>
+              : unplaced.map(b=><div key={b.id}><BizCard business={b} color={color}/></div>)
+            }
+          </div>
+          <MatrixBoard matrix={mat} onDrop={()=>{}} readOnly
+            renderCell={(r,c,cell)=>cell.map(b=>(
+              <div key={b.id}><BizCard business={b} color={color} small /></div>
+            ))}
+          />
         </div>
       )}
-
-      {/* Sin ubicar */}
-      <div
-        onClick={() => { if (selected && selected.fromCell && canInteract) {
-          const nm = JSON.parse(JSON.stringify(mat));
-          const [fr, fc] = selected.fromCell;
-          nm[fr][fc] = nm[fr][fc].filter(b => b.id !== selected.biz.id);
-          persist({ ...session, votes: { ...session.votes, [role]: nm } });
-          setSelected(null);
-        }}}
-        style={{ minHeight: 52, padding: 10, background: selected && selected.fromCell ? "#e3f2fd" : "#fafafa", borderRadius: 10, border: `2px dashed ${selected && selected.fromCell ? "#1976d2" : "#ddd"}`, marginBottom: 14, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", cursor: selected && selected.fromCell ? "pointer" : "default" }}>
-        <span style={{ fontSize: 11, color: "#aaa", fontWeight: 700, marginRight: 4 }}>SIN UBICAR:</span>
-        {unplaced.length === 0
-          ? <span style={{ fontSize: 12, color: "#4caf50", fontWeight: 700 }}>✓ Todos ubicados</span>
-          : unplaced.map(b => (
-            <div key={b.id}
-              draggable={canInteract}
-              onDragStart={e => { if (canInteract) { selectBiz(b, null); e.dataTransfer.effectAllowed = "move"; } }}
-              onClick={e => { e.stopPropagation(); selectBiz(b, null); }}
-            >
-              <BizCard business={b} color={color} selected={selected?.biz.id === b.id} />
-            </div>
-          ))
-        }
-        {selected && selected.fromCell && <span style={{ fontSize: 11, color: "#1976d2", fontWeight: 700 }}>← Tocá acá para devolver</span>}
-      </div>
-
-      <MatrixBoard
-        matrix={mat}
-        onDrop={(e, r, c) => placeInCell(r, c)}
-        readOnly={!canInteract}
-        selected={selected}
-        renderCell={(r, c, cell) => cell.map(b => (
-          <div key={b.id}
-            draggable={canInteract}
-            onDragStart={e => { if (canInteract) { selectBiz(b, [r, c]); e.dataTransfer.effectAllowed = "move"; } }}
-            onClick={e => {
-              e.stopPropagation();
-              if (!canInteract) return;
-              if (selected && selected.biz.id !== b.id) {
-                placeInCell(r, c);
-              } else {
-                selectBiz(b, [r, c]);
-              }
-            }}
-          >
-            <BizCard business={b} color={color} small selected={selected?.biz.id === b.id} />
-          </div>
-        ))}
-      />
     </div>
   );
 }
