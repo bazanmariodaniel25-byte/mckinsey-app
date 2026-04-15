@@ -455,40 +455,75 @@ function RevealPanel({ session, colorMap }) {
 
 // ── PANEL: Discussion ─────────────────────────────────────────
 function DiscussionPanel({ session, persist, role, colorMap, isAdmin }) {
-  const [selected, setSelected] = useState(null);
+  const [dragging, setDragging] = useState(null);
   const [msg, setMsg] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const chatRef = useRef(null);
+  const ghostRef = useRef(null);
   const consMat = session.consensusMatrix;
   const placed = consMat.flat(2).map(b => b.id);
   const unplaced = session.businesses.filter(b => !placed.includes(b.id));
 
   useEffect(() => { if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight; }, [session.discussion]);
 
-  const placeInCell = (r, c) => {
-    if (!selected || !isAdmin) return;
-    const nm = consMat.map(row => row.map(cell => [...cell]));
-    if (selected.fromCell) { const [fr, fc] = selected.fromCell; nm[fr][fc] = nm[fr][fc].filter(b => b.id !== selected.biz.id); }
-    nm[r][c].push(selected.biz);
-    persist({ ...session, consensusMatrix: nm });
-    setSelected(null);
+  useEffect(() => {
+    if (!isAdmin) return;
+    const ghost = document.createElement("div");
+    ghost.style.cssText = "position:fixed;pointer-events:none;z-index:9999;background:#37474f;color:#fff;padding:4px 10px;border-radius:8px;font-size:13px;font-weight:700;opacity:0.85;display:none;transform:translate(-50%,-50%)";
+    document.body.appendChild(ghost);
+    ghostRef.current = ghost;
+    return () => document.body.removeChild(ghost);
+  }, [isAdmin]);
+
+  const showGhost = (text, x, y) => { if (ghostRef.current) { ghostRef.current.textContent = text; ghostRef.current.style.display = "block"; ghostRef.current.style.left = x + "px"; ghostRef.current.style.top = y + "px"; } };
+  const hideGhost = () => { if (ghostRef.current) ghostRef.current.style.display = "none"; };
+
+  const onTouchStart = (biz, fromCell) => e => {
+    if (!isAdmin) return;
+    e.stopPropagation();
+    _touchDragData = { biz, fromCell };
+    setDragging({ biz, fromCell });
+    const t = e.touches[0];
+    showGhost(biz.name, t.clientX, t.clientY);
   };
 
-  const handleDrop = (e, r, c) => { placeInCell(r, c); };
+  const onTouchMove = e => {
+    if (!_touchDragData) return;
+    e.preventDefault();
+    const t = e.touches[0];
+    showGhost(_touchDragData.biz.name, t.clientX, t.clientY);
+  };
+
+  const onTouchEnd = e => {
+    hideGhost();
+    _touchDragData = null;
+    setDragging(null);
+  };
+
+  const handleDrop = (e, r, c) => {
+    if (e) e.preventDefault();
+    const d = dragging || _touchDragData;
+    if (!d || !isAdmin) return;
+    const nm = consMat.map(row => row.map(cell => [...cell]));
+    if (d.fromCell) { const [fr, fc] = d.fromCell; nm[fr][fc] = nm[fr][fc].filter(b => b.id !== d.biz.id); }
+    nm[r][c].push(d.biz);
+    persist({ ...session, consensusMatrix: nm });
+    setDragging(null);
+    _touchDragData = null;
+    hideGhost();
+  };
 
   const handleDropUnplaced = e => {
-    if (!selected || !selected.fromCell || !isAdmin) return;
+    if (e) e.preventDefault();
+    const d = dragging || _touchDragData;
+    if (!d || !d.fromCell || !isAdmin) return;
     const nm = consMat.map(row => row.map(cell => [...cell]));
-    const [fr, fc] = selected.fromCell;
-    nm[fr][fc] = nm[fr][fc].filter(b => b.id !== selected.biz.id);
+    const [fr, fc] = d.fromCell;
+    nm[fr][fc] = nm[fr][fc].filter(b => b.id !== d.biz.id);
     persist({ ...session, consensusMatrix: nm });
-    setSelected(null);
-  };
-
-  const selectBiz = (biz, fromCell = null) => {
-    if (!isAdmin) return;
-    if (selected && selected.biz.id === biz.id) { setSelected(null); return; }
-    setSelected({ biz, fromCell });
+    setDragging(null);
+    _touchDragData = null;
+    hideGhost();
   };
 
   const sendMsg = () => {
@@ -542,44 +577,44 @@ function DiscussionPanel({ session, persist, role, colorMap, isAdmin }) {
         <div style={{ marginBottom: 10, padding: "8px 14px", background: isAdmin ? "#fff3e0" : "#e8f5e9", borderRadius: 8, fontSize: 13, fontWeight: 700, color: isAdmin ? "#e65100" : "#2e7d32" }}>
           {isAdmin ? "💬 Definí la posición consensuada (solo admin puede mover)" : "💬 Seguí la discusión en el chat"}
         </div>
-        {isAdmin && selected && (
-          <div style={{ marginBottom: 8, padding: "6px 12px", background: "#e3f2fd", borderRadius: 8, fontSize: 13, fontWeight: 700, color: "#1565c0", textAlign: "center" }}>
-            "{selected.biz.name}" seleccionado — tocá el cuadrante destino
-          </div>
-        )}
         <div
-          onClick={() => { if (selected && selected.fromCell) handleDropUnplaced(); }}
-          style={{ minHeight: 48, padding: 8, background: selected && selected.fromCell ? "#e3f2fd" : "#fafafa", border: `2px dashed ${selected && selected.fromCell ? "#1976d2" : "#ddd"}`, borderRadius: 10, marginBottom: 12, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", cursor: selected && selected.fromCell ? "pointer" : "default" }}>
+          onDragOver={e => e.preventDefault()}
+          onDrop={handleDropUnplaced}
+          onTouchEnd={e => { if (_touchDragData && _touchDragData.fromCell) handleDropUnplaced(e); else onTouchEnd(e); }}
+          style={{ minHeight: 48, padding: 8, background: "#fafafa", border: "2px dashed #ddd", borderRadius: 10, marginBottom: 12, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
           <span style={{ fontSize: 11, color: "#aaa", fontWeight: 700 }}>SIN UBICAR:</span>
           {unplaced.length === 0
             ? <span style={{ fontSize: 12, color: "#4caf50", fontWeight: 700 }}>✓ Todos ubicados</span>
             : unplaced.map(b => (
               <div key={b.id}
                 draggable={isAdmin}
-                onDragStart={e => { if (isAdmin) { selectBiz(b, null); e.dataTransfer.effectAllowed = "move"; } }}
-                onClick={e => { e.stopPropagation(); selectBiz(b, null); }}
+                onDragStart={e => { if (isAdmin) { setDragging({ biz: b, fromCell: null }); e.dataTransfer.effectAllowed = "move"; } }}
+                onDragEnd={() => setDragging(null)}
+                onTouchStart={onTouchStart(b, null)}
+                onTouchEnd={onTouchEnd}
+                style={{ touchAction: "none" }}
               >
-                <BizCard business={b} color="#546e7a" selected={selected?.biz.id === b.id} />
+                <BizCard business={b} color="#546e7a" />
               </div>
             ))
           }
         </div>
-        <MatrixBoard matrix={consMat} onDrop={isAdmin ? handleDrop : () => {}} readOnly={!isAdmin} selected={isAdmin ? selected : null}
+        <div onTouchMove={onTouchMove}>
+        <MatrixBoard matrix={consMat} onDrop={isAdmin ? handleDrop : () => {}} readOnly={!isAdmin}
           renderCell={(r, c, cell) => cell.map((b, i) => (
             <div key={i}
               draggable={isAdmin}
-              onDragStart={e => { if (isAdmin) { selectBiz(b, [r, c]); e.dataTransfer.effectAllowed = "move"; } }}
-              onClick={e => {
-                e.stopPropagation();
-                if (!isAdmin) return;
-                if (selected && selected.biz.id !== b.id) { placeInCell(r, c); }
-                else { selectBiz(b, [r, c]); }
-              }}
+              onDragStart={e => { if (isAdmin) { setDragging({ biz: b, fromCell: [r, c] }); e.dataTransfer.effectAllowed = "move"; } }}
+              onDragEnd={() => setDragging(null)}
+              onTouchStart={onTouchStart(b, [r, c])}
+              onTouchEnd={onTouchEnd}
+              style={{ touchAction: "none" }}
             >
-              <BizCard business={b} color="#37474f" small selected={selected?.biz.id === b.id} />
+              <BizCard business={b} color="#37474f" small />
             </div>
           ))}
         />
+        </div>
       </div>
 
       {/* Chat */}
